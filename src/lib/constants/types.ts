@@ -35,6 +35,9 @@ export type ControlSurfaceEntry = {
   /** In the profile written into the mouse: its plain press is not stored
    *  there (text, macro, menu…), so without Sidearm the button does not do it. */
   sidearmOnly?: boolean;
+  /** In a profile stored in mouse memory: this button's assignment executes
+   *  natively from the mouse flash (shown as a calm memory icon on the grid). */
+  inMouse?: boolean;
   /** Effective firmware assignment, only in the Without Sidearm view. */
   offline?: Omit<OfflineControl, "controlId" | "layer" | "kind"> & { kind: OfflineControl["kind"] | "unknown"; liveAction?: Action };
   /** Precise firmware result for the live layer's S mark. */

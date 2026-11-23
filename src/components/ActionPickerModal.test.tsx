@@ -166,6 +166,23 @@ describe("Without Sidearm in the live picker", () => {
     const { view } = livePicker("standard", true, gesture);
     expect(screen.getByText(i18n.t("offline.plainPressOnly"))).toBeTruthy();
     expect(view.container.querySelector(".action-picker__offline")).toBeNull();
+    const badge = view.container.querySelector(".action-picker__hw-badge");
+    expect(badge?.textContent).toContain(i18n.t("offline.badgeSidearmOnly"));
+    expect(badge?.textContent).toContain(i18n.t("offline.reason.gesture"));
+  });
+
+  it("shows the In mouse / Sidearm only compatibility badge live as the draft changes", () => {
+    const { view } = livePicker("standard", true, "press");
+    const badge = () => view.container.querySelector(".action-picker__hw-badge");
+    expect(badge()?.classList.contains("action-picker__hw-badge--mouse")).toBe(true);
+    expect(badge()?.textContent).toContain(i18n.t("offline.badgeInMouse"));
+
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("action.type.textSnippet") }));
+    expect(badge()?.classList.contains("action-picker__hw-badge--sidearm")).toBe(true);
+    expect(badge()?.textContent).toContain(i18n.t("offline.badgeSidearmOnly"));
+    expect(badge()?.textContent).toContain(
+      i18n.t("offline.reason.actionType", { type: i18n.t("action.type.textSnippet") }),
+    );
   });
 });
 
@@ -734,5 +751,39 @@ describe("the same on the other mouse", () => {
     expect(screen.getByText("На Razer Naga V3 Pro это заменит «Copy»")).toBeTruthy();
     fireEvent.click(sync);
     expect(screen.queryByText("На Razer Naga V3 Pro это заменит «Copy»")).toBeNull();
+  });
+});
+
+describe("offline native fallback seeding", () => {
+  it("opens on Mouse with the native click instead of Silent, and shows the underlying live Sidearm action", () => {
+    const base = makeConfig();
+    const config: AppConfig = {
+      ...base,
+      physicalControls: [
+        ...base.physicalControls,
+        { id: "mouse_4", deviceId: "razer-naga", family: "topPanel", defaultName: "Назад", remappable: true, capabilityStatus: "verified" },
+      ],
+      actions: [
+        { id: "a_q", type: "textSnippet", displayName: "?", payload: { source: "inline", text: "?", pasteMode: "sendText", tags: [] } },
+      ],
+      bindings: [
+        { id: "b_q", profileId: "p1", layer: "hypershift", controlId: "mouse_4", actionId: "a_q", label: "?", enabled: true },
+      ],
+    };
+    render(
+      <ActionPickerModal
+        config={config}
+        bindingId={null}
+        profileId="p1"
+        controlId="mouse_4"
+        selectedLayer="offlineHypershift"
+        offlineControl={{ controlId: "mouse_4", layer: "offlineHypershift", kind: "inherited", native: "mouseBack", editable: true }}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /Мышь/ }).getAttribute("aria-current")).toBe("true");
+    expect(screen.getByRole("button", { name: /Молчит/ }).getAttribute("aria-current")).toBeNull();
+    expect(screen.getByText(/В Sidearm на этой кнопке: \?/)).toBeTruthy();
   });
 });

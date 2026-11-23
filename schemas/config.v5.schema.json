@@ -30,7 +30,8 @@
         10,
         11,
         12,
-        13
+        13,
+        14
       ]
     },
     "settings": {
@@ -434,6 +435,9 @@
                   "minimum": 100,
                   "maximum": 50000
                 }
+              },
+              "hardwareBank": {
+                "type": "boolean"
               }
             }
           }

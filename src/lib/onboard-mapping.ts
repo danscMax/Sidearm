@@ -1,4 +1,4 @@
-import type { Action, AppConfig, Binding, ControlId, OfflineLayer } from "./config";
+import type { Action, ActionType, AppConfig, Binding, ControlId, Layer, OfflineLayer } from "./config";
 import { gestureOf } from "./config-editing";
 import { primaryKeyCode } from "./key-names";
 
@@ -32,6 +32,136 @@ export function playsWithoutSidearm(binding: Binding, action: Action | null | un
     && !(action.payload.ctrl || action.payload.shift || action.payload.alt || action.payload.win);
 }
 
+type HardwarePlayabilityReason =
+  | "actionType"
+  | "gesture"
+  | "chord"
+  | "conditions"
+  | "throttle"
+  | "layer"
+  | "hs2Override"
+  | "key"
+  | "mouseModifiers";
+
+interface HardwarePlayability {
+  /** "mouse" = executes natively from mouse flash; "sidearm" = requires Sidearm. */
+  location: "mouse" | "sidearm";
+  /** Present when location === "sidearm"; names the primary reason. */
+  reason?: HardwarePlayabilityReason;
+  /** Action type for interpolating the actionType reason. */
+  actionType?: ActionType;
+}
+
+/**
+ * Classifies whether a live assignment on a built-in mouse can play directly
+ * from mouse memory ("mouse") or requires running Sidearm ("sidearm") and why.
+ */
+export function classifyHardwarePlayability(
+  config: AppConfig,
+  profileId: string,
+  layer: Layer,
+  controlId: ControlId,
+  binding: Binding | null | undefined,
+  action: Action | null | undefined,
+  opts: { checkHs2?: boolean } = {},
+): HardwarePlayability {
+  if (!binding || !binding.enabled || !action) {
+    return { location: "mouse" };
+  }
+  if (layer !== "standard" && layer !== "hypershift") {
+    return { location: "sidearm", reason: "layer" };
+  }
+  if (binding.triggerMode === "chord") {
+    return { location: "sidearm", reason: "chord" };
+  }
+  if (gestureOf(binding.triggerMode) !== "press") {
+    return { location: "sidearm", reason: "gesture" };
+  }
+  if (!playsWithoutSidearm(binding, action)) {
+    if (action.type === "shortcut") {
+      return { location: "sidearm", reason: "key" };
+    }
+    if (action.type === "mouseAction") {
+      return { location: "sidearm", reason: "mouseModifiers" };
+    }
+    return { location: "sidearm", reason: "actionType", actionType: action.type };
+  }
+  if (binding.throttleMs && binding.throttleMs > 0) {
+    return { location: "sidearm", reason: "throttle" };
+  }
+  const hasExtraGesture = config.bindings.some(
+    (other) =>
+      other.id !== binding.id &&
+      other.profileId === profileId &&
+      (other.layer === layer || (layer === "hypershift" && other.layer === "standard")) &&
+      other.controlId === controlId &&
+      other.enabled &&
+      gestureOf(other.triggerMode) !== "press",
+  );
+  if (hasExtraGesture) {
+    return { location: "sidearm", reason: "gesture" };
+  }
+  if (action.conditions && action.conditions.length > 0) {
+    return { location: "sidearm", reason: "conditions" };
+  }
+  if (opts.checkHs2) {
+    const hasHs2 = config.bindings.some(
+      (other) =>
+        other.profileId === profileId &&
+        other.controlId === controlId &&
+        other.enabled &&
+        (other.layer === "hypershift2" || other.layer === "hypershiftBoth"),
+    );
+    if (hasHs2) {
+      return { location: "sidearm", reason: "hs2Override" };
+    }
+  }
+  return { location: "mouse" };
+}
+
+/** Counts how many enabled assignments of `deviceId` in `profileId`
+ *  (Standard + HyperShift) can play from mouse memory vs require Sidearm. */
+export function summarizeProfileHardwarePlayability(
+  config: AppConfig,
+  profileId: string,
+  deviceId: string,
+  opts: { checkHs2?: boolean } = {},
+): { inMouse: number; sidearmOnly: number } {
+  const deviceControls = new Set(
+    config.physicalControls.filter((c) => c.deviceId === deviceId).map((c) => c.id),
+  );
+  const actionById = new Map(config.actions.map((a) => [a.id, a]));
+  const pressSlots = new Set<string>();
+  const gestureOnlySlots = new Set<string>();
+  let inMouse = 0;
+  let sidearmOnly = 0;
+  for (const binding of config.bindings) {
+    if (
+      binding.profileId !== profileId ||
+      !binding.enabled ||
+      (binding.layer !== "standard" && binding.layer !== "hypershift") ||
+      !deviceControls.has(binding.controlId)
+    ) {
+      continue;
+    }
+    const action = actionById.get(binding.actionId);
+    if (!action) continue;
+    const slotKey = `${binding.layer}:${binding.controlId}`;
+    if (gestureOf(binding.triggerMode) !== "press") {
+      gestureOnlySlots.add(slotKey);
+      continue;
+    }
+    pressSlots.add(slotKey);
+    const status = classifyHardwarePlayability(config, profileId, binding.layer, binding.controlId, binding, action, opts);
+    if (status.location === "mouse") inMouse += 1;
+    else sidearmOnly += 1;
+  }
+  for (const slotKey of gestureOnlySlots) {
+    if (!pressSlots.has(slotKey)) sidearmOnly += 1;
+  }
+  return { inMouse, sidearmOnly };
+}
+
 /** Rust's firmware planner preview; the UI never derives these decisions. */
 export interface OfflineControl {
   controlId: string;
@@ -50,9 +180,11 @@ export interface OfflinePreview {
     state: "written" | "notWritten" | "followsWindow" | "unknown" | "pending";
     bank?: number;
     writtenProfileId?: string;
-    banks?: { bank: number; profileId: string }[];
+    banks?: { bank: number; profileId: string; hybrid?: boolean }[];
     /** V3: the bank the exit selects, so the mouse plays it after Sidearm closes. */
     playingBank?: number;
+    /** V3: effective hybrid hardware-bank mode for this profile (authoritative from backend). */
+    hybrid?: boolean;
   };
   controls: OfflineControl[];
 }

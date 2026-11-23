@@ -1312,9 +1312,13 @@ fn report_execution(
                 && let crate::config::ActionPayload::ProfileSwitch(p) = &action.payload
                 && let Ok(mut store) = runtime_store.lock()
             {
+                #[cfg(target_os = "windows")]
+                let rev = Some(crate::mouse_memory::live_overlay::next_profile_revision());
+                #[cfg(not(target_os = "windows"))]
+                let rev: Option<u64> = None;
                 store.set_manual_profile_override(Some(p.target_profile_id.clone()));
                 drop(store);
-                follow_manual_profile(&p.target_profile_id);
+                follow_manual_profile(&p.target_profile_id, Some(config), rev);
             }
             let _ = app.emit(EVENT_ACTION_EXECUTED, &execution);
             count_press(config, preview, &execution.action_id, !menu_pick);
@@ -1503,16 +1507,64 @@ fn menu_item_preview(menu_press: &resolver::ResolvedInputPreview, action: &confi
     preview
 }
 
+#[cfg(target_os = "windows")]
+static LAST_APPLIED_PROFILE_ID: Mutex<Option<Option<String>>> = Mutex::new(None);
+
+/// Clears the last hardware-reconciled profile (e.g. when runtime stops) so the
+/// next start reconciles unconditionally.
+pub(crate) fn reset_applied_profile() {
+    #[cfg(target_os = "windows")]
+    if let Ok(mut guard) = LAST_APPLIED_PROFILE_ID.lock() {
+        *guard = None;
+    }
+}
+
+/// Reconciles connected mouse hardware (live DPI/poll rate and V3 hybrid bank)
+/// to the authoritative effective enabled profile (or `None` to return to the
+/// shared Sidearm bank). Independent of OSD notification deduplication.
+fn apply_profile_hardware(profile: Option<&crate::config::Profile>, config: &AppConfig, revision: Option<u64>) {
+    #[cfg(target_os = "windows")]
+    {
+        let next_id = profile.map(|p| p.id.clone());
+        let changed = LAST_APPLIED_PROFILE_ID
+            .lock()
+            .map(|mut guard| {
+                if guard.as_ref() == Some(&next_id) && revision.is_none() {
+                    false
+                } else {
+                    *guard = Some(next_id);
+                    true
+                }
+            })
+            .unwrap_or(true);
+        if !changed {
+            return;
+        }
+        if let Some(profile) = profile {
+            crate::mouse_speed::apply_profile_mouse_settings(profile);
+        }
+        crate::mouse_memory::live_overlay::set_desired_profile(profile, config, revision);
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = (profile, config, revision);
+}
+
 /// Emit the resolved-profile event and, when the active profile changed, show
 /// the OSD. Shared by the manual key-event path and the per-OS foreground
 /// watchers (the tail was previously copied in mod.rs, windows.rs, linux.rs).
 /// A profile chosen by hand (tray, ProfileSwitch action): the HyperShift 2
-/// trigger follows it at once, without waiting for a window change.
-pub(crate) fn follow_manual_profile(profile_id: &str) {
+/// trigger and mouse hardware follow it at once, without waiting for a window change.
+pub(crate) fn follow_manual_profile(profile_id: &str, config: Option<&AppConfig>, revision: Option<u64>) {
     #[cfg(target_os = "windows")]
-    windows::follow_profile_hypershift2(Some(profile_id));
+    {
+        let effective = config.and_then(|cfg| cfg.profiles.iter().find(|p| p.id == profile_id && p.enabled));
+        windows::follow_profile_hypershift2(effective.map(|p| p.id.as_str()));
+        if let Some(config) = config {
+            apply_profile_hardware(effective, config, revision);
+        }
+    }
     #[cfg(not(target_os = "windows"))]
-    let _ = profile_id;
+    let _ = (profile_id, config, revision);
 }
 
 pub(crate) fn emit_profile_resolved_and_notify(
@@ -1527,8 +1579,13 @@ pub(crate) fn emit_profile_resolved_and_notify(
         // Remember the real foreground window (so the tray "create rule" path can
         // fall back to it — at tray-click time the live foreground is Sidearm) and
         // decide whether the profile changed, in a single lock acquisition.
+        let effective_profile = capture_result
+            .resolved_profile_id
+            .as_deref()
+            .and_then(|id| config.profiles.iter().find(|p| p.id == id && p.enabled));
         #[cfg(target_os = "windows")]
-        windows::follow_profile_hypershift2(capture_result.resolved_profile_id.as_deref());
+        windows::follow_profile_hypershift2(effective_profile.map(|p| p.id.as_str()));
+        apply_profile_hardware(effective_profile, config, None);
         let should_notify = if let Ok(mut store) = runtime_store.lock() {
             store.set_last_foreground_window(capture_result.clone());
             store.notify_profile_change(capture_result.resolved_profile_id.as_deref())
@@ -1542,14 +1599,6 @@ pub(crate) fn emit_profile_resolved_and_notify(
                 .unwrap_or("Default");
             let label = crate::ui_text::native(&crate::ui_text!("runtime.osdProfileLabel", "Profile:"));
             crate::show_osd(app, &label, profile_name, &config.settings);
-            #[cfg(target_os = "windows")]
-            if let Some(profile) = capture_result
-                .resolved_profile_id
-                .as_deref()
-                .and_then(|id| config.profiles.iter().find(|p| p.id == id))
-            {
-                crate::mouse_speed::apply_profile_mouse_settings(profile);
-            }
         }
     }
 }

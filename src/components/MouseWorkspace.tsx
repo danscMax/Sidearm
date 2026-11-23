@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { OFFLINE_PROFILE_ACTIVE, type AppConfig, type MouseOverrides, type Profile } from "../lib/config";
 import { uiText } from "../lib/ui-text";
@@ -18,7 +18,7 @@ import {
   setMouseDpi,
   setMousePollRate,
 } from "../lib/backend";
-import type { MouseSettings as MouseSettingsState, MouseStatusKind, NativeModelInfo, OnboardBanks } from "../lib/onboard-mapping";
+import { summarizeProfileHardwarePlayability, type MouseSettings as MouseSettingsState, type MouseStatusKind, type NativeModelInfo, type OnboardBanks } from "../lib/onboard-mapping";
 import { PillTrack } from "./PillTrack";
 import { dpiStageChoices, dpiStagesForValue } from "../lib/dpi-stages";
 import { listenActionExecutionEvent } from "../lib/backend";
@@ -317,25 +317,67 @@ export function MouseWorkspace({
   }
 
   if (section === "memory") {
+    const memoryCounts = activeProfile
+      ? summarizeProfileHardwarePlayability(activeConfig, activeProfile.id, target, { checkHs2: model?.banks ?? false })
+      : null;
+    const dedicatedOfflineId =
+      activeConfig.settings.offlineProfileId
+      && activeConfig.settings.offlineProfileId !== OFFLINE_PROFILE_ACTIVE
+      && profiles.some((profile) => profile.id === activeConfig.settings.offlineProfileId)
+        ? activeConfig.settings.offlineProfileId
+        : activeConfig.settings.fallbackProfileId;
+    const dedicatedOfflineProfile = profiles.find((profile) => profile.id === dedicatedOfflineId) ?? null;
+    const offlineHardwareBankConflict = Boolean(
+      model?.banks
+      && dedicatedOfflineProfile
+      && dedicatedOfflineProfile.deviceSlots?.[model.deviceId] !== undefined
+      && dedicatedOfflineProfile.deviceMouse?.[model.deviceId]?.hardwareBank,
+    );
     return (
       <div className="settings-shell__content">
+      {activeProfile && memoryCounts ? (
+        <section className="settings-section" aria-label={t("offline.memorySummaryTitle", { name: activeProfile.name })}>
+          <SettingRow
+            title={t("offline.memorySummaryTitle", { name: activeProfile.name })}
+            hint={t("offline.memorySummary", memoryCounts)}
+          />
+        </section>
+      ) : null}
       {model?.banks && model.connected ? (
         <section className="settings-section" aria-label={t("mouse.slotsHeader")}>
           <SettingRow title={t("mouse.slotsHeader")} hint={t("mouse.slotsHelp", { model: model.name })} />
           {banks === null ? <p className="panel__muted help-sm">{t("mouse.slotNeedsMouse")}</p> : banks.assigned.map((bank) => {
             const holder = profiles.find((profile) => profile.deviceSlots?.[model.deviceId] === bank);
+            const isDedicatedOffline = holder?.id === dedicatedOfflineId;
+            const hardwareBankOn = Boolean(holder && !isDedicatedOffline && holder.deviceMouse?.[model.deviceId]?.hardwareBank);
             return (
-              <SettingRow key={bank} sub title={t("mouse.slotRow", { n: bank })}
-                hint={banks.active === bank ? t("mouse.slotSelected") : undefined}>
-                <PillTrack
-                  items={[{ key: "", label: t("mouse.slotKeep") },
-                    ...profiles.map((profile) => ({ key: profile.id, label: profile.name }))]}
-                  active={holder?.id ?? ""}
-                  onSelect={(profileId) => updateDraft((config) => profileId
-                    ? setProfileDeviceSlot(config, profileId, model.deviceId, bank)
-                    : holder ? setProfileDeviceSlot(config, holder.id, model.deviceId, undefined) : config)}
-                />
-              </SettingRow>
+              <Fragment key={bank}>
+                <SettingRow sub title={t("mouse.slotRow", { n: bank })}
+                  hint={banks.active === bank ? t("mouse.slotSelected") : undefined}>
+                  <PillTrack
+                    items={[{ key: "", label: t("mouse.slotKeep") },
+                      ...profiles.map((profile) => ({ key: profile.id, label: profile.name }))]}
+                    active={holder?.id ?? ""}
+                    onSelect={(profileId) => updateDraft((config) => profileId
+                      ? setProfileDeviceSlot(config, profileId, model.deviceId, bank)
+                      : holder ? setProfileDeviceSlot(config, holder.id, model.deviceId, undefined) : config)}
+                  />
+                </SettingRow>
+                {holder ? (
+                  <SettingRow
+                    sub
+                    title={t("mouse.hardwareBankTitle", { name: holder.name })}
+                    hint={isDedicatedOffline ? t("mouse.hardwareBankOfflineGuard") : t("mouse.hardwareBankHint")}
+                  >
+                    <Toggle
+                      checked={hardwareBankOn}
+                      disabled={isDedicatedOffline}
+                      ariaLabel={t("mouse.hardwareBankTitle", { name: holder.name })}
+                      onChange={(checked) => updateDraft((config) => setProfileMouse(config, holder.id, model.deviceId, { hardwareBank: checked }))}
+                    />
+                  </SettingRow>
+                ) : null}
+              </Fragment>
             );
           })}
           {sidearmBank !== null ? (
@@ -374,6 +416,18 @@ export function MouseWorkspace({
             }
           />
         </SettingRow>
+        {offlineHardwareBankConflict && dedicatedOfflineProfile && model ? (
+          <Notice variant="warning">
+            <p>{t("mouse.hardwareBankOfflineConflict", { name: dedicatedOfflineProfile.name })}</p>
+            <button
+              type="button"
+              className="action-button action-button--secondary action-button--small mt-8"
+              onClick={() => updateDraft((config) => setProfileMouse(config, dedicatedOfflineProfile.id, model.deviceId, { hardwareBank: false }))}
+            >
+              {t("mouse.hardwareBankTurnOff")}
+            </button>
+          </Notice>
+        ) : null}
       </section>
       </div>
     );

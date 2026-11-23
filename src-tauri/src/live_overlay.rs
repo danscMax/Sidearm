@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering},
         mpsc,
     },
     thread,
@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{ConsumerSignal, MODE_NORMAL, OnboardAction, VendorDevice};
 use crate::{
-    config::{ActionType, AppConfig, CapabilityStatus, ControlId, Device, EncoderMapping, Layer, MappingSource},
+    config::{ActionType, AppConfig, CapabilityStatus, ControlId, Device, EncoderMapping, Layer, MappingSource, Profile},
     device_catalog::{CATALOG, CATALOG_LEN, NativeModel, Transport},
 };
 
@@ -53,9 +53,53 @@ pub const MAX_BANKS: u8 = 5;
 
 static ACTIVE: [AtomicBool; CATALOG_LEN] = [const { AtomicBool::new(false) }; CATALOG_LEN];
 static READY: [AtomicBool; CATALOG_LEN] = [const { AtomicBool::new(false) }; CATALOG_LEN];
+/// Sidearm's own bank claimed by an active bank session (0 when no bank session owns the mouse).
+static SIDEARM_BANK: [AtomicU8; CATALOG_LEN] = [const { AtomicU8::new(0) }; CATALOG_LEN];
+/// The live bank Sidearm currently expects the mouse to play (`SIDEARM_BANK` or a profile's
+/// hybrid hardware bank; 0 when no bank session owns the mouse).
+static ACTIVE_LIVE_BANK: [AtomicU8; CATALOG_LEN] = [const { AtomicU8::new(0) }; CATALOG_LEN];
+/// Bitmask (`1 << bank`, `bank in 1..=MAX_BANKS`) of hybrid banks verified stored for the
+/// current config. A hybrid bank is never selected live until its bit is set here.
+static VERIFIED_HYBRID_BANKS: [AtomicU8; CATALOG_LEN] = [const { AtomicU8::new(0) }; CATALOG_LEN];
+/// True while the UI's input-capture / button-test mode is active: bank mice stay on
+/// `SIDEARM_BANK` so native flash keys (like Delete) cannot fire during button testing.
+static INPUT_TEST_MODE: AtomicBool = AtomicBool::new(false);
+/// Monotonic revision for authoritative profile switches (tray, ProfileSwitch, foreground).
+static PROFILE_REVISION: AtomicU64 = AtomicU64::new(0);
+/// Latest desired live profile and config snapshot, replayed on readiness, wake, return
+/// online, and background bank-store completion.
+#[derive(Clone)]
+struct DesiredProfile {
+    revision: u64,
+    profile: Option<Profile>,
+    config: AppConfig,
+}
+static DESIRED_PROFILE: Mutex<Option<DesiredProfile>> = Mutex::new(None);
+/// Active config directory for updating the Sidearm-bank recovery marker before switching
+/// into a hybrid bank.
+static SESSION_CONFIG_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 /// Sidearm's bank of each mouse its profile button took off it (offline
 /// mode), else 0.
 static OFFLINE: [AtomicU8; CATALOG_LEN] = [const { AtomicU8::new(0) }; CATALOG_LEN];
+
+/// Allocates a strictly increasing profile-switch revision so out-of-order async
+/// handlers (tray clicks) cannot overwrite a newer selection.
+pub fn next_profile_revision() -> u64 {
+    PROFILE_REVISION.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+/// Whether `model` is currently in manual offline mode (user pressed the mouse's
+/// profile button to leave Sidearm's bank).
+pub fn is_offline(model: &NativeModel) -> bool {
+    OFFLINE[model.catalog_index()].load(Ordering::Acquire) != 0
+}
+
+/// Whether `model` is currently owned by a Sidearm bank session (used by `mouse_speed`
+/// so bank-managed mice apply bank selection BEFORE live DPI under one device lock).
+pub fn is_bank_managed(model: &NativeModel) -> bool {
+    let index = model.catalog_index();
+    SIDEARM_BANK[index].load(Ordering::Acquire) != 0 && !RELEASED[index].load(Ordering::Acquire)
+}
 
 /// The mice in offline mode: the profile button left Sidearm's bank.
 pub fn offline_models() -> Vec<&'static NativeModel> {
@@ -63,20 +107,265 @@ pub fn offline_models() -> Vec<&'static NativeModel> {
 }
 
 /// Puts every mouse in offline mode back on Sidearm's bank (its session sees
-/// it play and is online again).
+/// it play and is online again), then immediately reconciles the desired profile.
 pub fn back_to_sidearm_bank() -> Result<(), String> {
     for model in offline_models() {
-        let bank = OFFLINE[model.catalog_index()].load(Ordering::Acquire);
+        let index = model.catalog_index();
+        let bank = OFFLINE[index].load(Ordering::Acquire);
         let device = VendorDevice::open_model(model)?;
         // Holding the device: a session that stopped meanwhile cleared OFFLINE
         // first, and its mouse must not be put back on a bank nobody watches.
-        if OFFLINE[model.catalog_index()].load(Ordering::Acquire) != bank {
+        if OFFLINE[index].load(Ordering::Acquire) != bank {
             continue;
         }
         select_bank(&device, bank)?;
+        ACTIVE_LIVE_BANK[index].store(bank, Ordering::Release);
+        set_offline(model, 0);
         log::info!("[naga-live] {} put back on the Sidearm bank {bank}", model.name);
+        if let Err(error) = reconcile_on_device(&device, None, None) {
+            log::warn!("[naga-live] {} desired profile not reconciled after returning online: {error}", model.name);
+        }
     }
     Ok(())
+}
+
+/// Target live bank for `profile` on `model`: the profile's own verified hybrid slot
+/// when `hardware_bank` is active and verified for the current config, else `sidearm`.
+fn desired_live_bank(profile: Option<&Profile>, config: &AppConfig, model: &NativeModel, banks: &Banks, sidearm: u8) -> u8 {
+    if INPUT_TEST_MODE.load(Ordering::Acquire) {
+        return sidearm;
+    }
+    let Some(profile) = profile else { return sidearm };
+    if !profile.enabled {
+        return sidearm;
+    }
+    let user = Banks {
+        assigned: banks.assigned.iter().copied().filter(|&bank| bank != sidearm).collect(),
+        active: banks.active,
+    };
+    let offline = crate::mouse_offline::offline_profile_id(config, None);
+    let plan = bank_plan(config, model, &user, &offline);
+    let verified = VERIFIED_HYBRID_BANKS[model.catalog_index()].load(Ordering::Acquire);
+    if let Some(entry) = plan.iter().find(|entry| entry.profile_id == profile.id && entry.hybrid) {
+        if (verified & (1u8 << entry.bank)) != 0 {
+            return entry.bank;
+        }
+        log::debug!(
+            "[naga-live] {} profile `{}` hybrid bank {} is not yet verified stored; staying on Sidearm bank {sidearm}",
+            model.name, profile.name, entry.bank,
+        );
+    }
+    sidearm
+}
+
+/// Reconciles `device` (holding its `VendorDevice` lock) to the latest `DESIRED_PROFILE`:
+/// selects the verified hybrid bank (or `SIDEARM_BANK`), then applies live DPI/poll rate
+/// on the same device lock so `select_bank` never clobbers live DPI.
+/// Treats any unexpected active hardware bank as a manual profile-button press rather
+/// than overwriting the user's choice.
+fn reconcile_on_device(
+    device: &VendorDevice,
+    config_dir: Option<&Path>,
+    expected_revision: Option<u64>,
+) -> Result<bool, String> {
+    if crate::is_shutting_down() {
+        return Ok(false);
+    }
+    let model = device.model();
+    let index = model.catalog_index();
+    let sidearm = SIDEARM_BANK[index].load(Ordering::Acquire);
+    if sidearm == 0 || OFFLINE[index].load(Ordering::Acquire) != 0 || RELEASED[index].load(Ordering::Acquire) {
+        return Ok(false);
+    }
+    let banks = read_banks(device)?;
+    let expected = ACTIVE_LIVE_BANK[index].load(Ordering::Acquire);
+    if expected != 0 && banks.active != expected {
+        log::warn!(
+            "[naga-live] {} plays bank {} (profile button): offline until the Sidearm bank {sidearm} plays again",
+            model.name, banks.active,
+        );
+        set_offline(model, sidearm);
+        return Ok(false);
+    }
+    let snapshot = DESIRED_PROFILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+    if let Some(req_rev) = expected_revision
+        && snapshot.as_ref().is_some_and(|desired| desired.revision != req_rev)
+    {
+        return Ok(false);
+    }
+    let mut effective_profile = snapshot.as_ref().and_then(|d| d.profile.clone());
+    let mut target = match &snapshot {
+        Some(desired) => desired_live_bank(desired.profile.as_ref(), &desired.config, model, &banks, sidearm),
+        None => sidearm,
+    };
+    let mut switched = false;
+    if banks.active != target {
+        wait_released(model);
+        if crate::is_shutting_down()
+            || SIDEARM_BANK[index].load(Ordering::Acquire) != sidearm
+            || OFFLINE[index].load(Ordering::Acquire) != 0
+            || RELEASED[index].load(Ordering::Acquire)
+        {
+            return Ok(false);
+        }
+        let banks_now = read_banks(device)?;
+        if expected != 0 && banks_now.active != expected {
+            log::warn!(
+                "[naga-live] {} plays bank {} (profile button): offline until the Sidearm bank {sidearm} plays again",
+                model.name, banks_now.active,
+            );
+            set_offline(model, sidearm);
+            return Ok(false);
+        }
+        // Re-read the latest desired profile after waiting for held buttons so a
+        // newer switch arriving meanwhile wins instead of being overwritten.
+        let latest = DESIRED_PROFILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+        effective_profile = latest.as_ref().and_then(|d| d.profile.clone());
+        target = match &latest {
+            Some(desired) => desired_live_bank(desired.profile.as_ref(), &desired.config, model, &banks_now, sidearm),
+            None => sidearm,
+        };
+        if banks_now.active != target {
+            if target != sidearm {
+                let marker_dir = config_dir.map(Path::to_path_buf).or_else(|| {
+                    SESSION_CONFIG_DIR.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+                });
+                if let Some(dir) = marker_dir {
+                    record_managed_hybrid_bank(&dir, model, sidearm, target);
+                }
+            }
+            select_bank(device, target)?;
+            ACTIVE_LIVE_BANK[index].store(target, Ordering::Release);
+            switched = true;
+            if let Some(profile) = &effective_profile {
+                log::info!("[naga-live] {} profile `{}` switched to live bank {target}", model.name, profile.name);
+            } else {
+                log::info!("[naga-live] {} switched to live bank {target}", model.name);
+            }
+        }
+    }
+    if !INPUT_TEST_MODE.load(Ordering::Acquire)
+        && let Some(profile) = &effective_profile
+    {
+        crate::mouse_speed::apply_profile_to_device(device, profile);
+    }
+    Ok(switched)
+}
+
+fn spawn_reconcile_for_bank_mice(expected_revision: Option<u64>) {
+    let pending: Vec<&'static NativeModel> = CATALOG
+        .iter()
+        .copied()
+        .filter(|model| {
+            if !model.live.as_ref().is_some_and(|live| live.banks) {
+                return false;
+            }
+            let index = model.catalog_index();
+            SIDEARM_BANK[index].load(Ordering::Acquire) != 0
+                && OFFLINE[index].load(Ordering::Acquire) == 0
+                && !RELEASED[index].load(Ordering::Acquire)
+        })
+        .collect();
+    if pending.is_empty() {
+        return;
+    }
+    let _ = thread::Builder::new().name("profile-bank".into()).spawn(move || {
+        for model in pending {
+            if crate::is_shutting_down() {
+                return;
+            }
+            let device = match VendorDevice::open_model(model) {
+                Ok(device) => device,
+                Err(error) => {
+                    log::warn!("[naga-live] {} profile bank reconcile skipped: {error}", model.name);
+                    continue;
+                }
+            };
+            if let Err(error) = reconcile_on_device(&device, None, expected_revision) {
+                log::warn!("[naga-live] {} profile bank reconcile failed: {error}", model.name);
+            }
+        }
+    });
+}
+
+/// Records the authoritative desired profile (or `None` when no enabled profile
+/// resolves) and reconciles any active bank-managed mouse asynchronously.
+pub fn set_desired_profile(profile: Option<&Profile>, config: &AppConfig, revision: Option<u64>) {
+    let rev = {
+        let mut guard = DESIRED_PROFILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let rev = match revision {
+            Some(r) => {
+                if guard.as_ref().is_some_and(|current| current.revision > r) {
+                    return;
+                }
+                r
+            }
+            None => next_profile_revision(),
+        };
+        *guard = Some(DesiredProfile {
+            revision: rev,
+            profile: profile.cloned(),
+            config: config.clone(),
+        });
+        rev
+    };
+    spawn_reconcile_for_bank_mice(Some(rev));
+}
+
+/// Enters or leaves UI input-capture / button-test mode. Entering synchronously
+/// returns every bank-managed mouse to `SIDEARM_BANK` before acknowledging the
+/// command so native flash keys (like Delete) cannot fire while testing buttons.
+pub fn set_input_test_mode(enabled: bool) -> Result<(), String> {
+    INPUT_TEST_MODE.store(enabled, Ordering::Release);
+    if enabled {
+        for model in CATALOG.iter().copied().filter(|m| is_bank_managed(m)) {
+            let index = model.catalog_index();
+            if OFFLINE[index].load(Ordering::Acquire) != 0 {
+                continue;
+            }
+            let sidearm = SIDEARM_BANK[index].load(Ordering::Acquire);
+            if ACTIVE_LIVE_BANK[index].load(Ordering::Acquire) == sidearm {
+                continue;
+            }
+            let device = VendorDevice::open_model(model)?;
+            reconcile_on_device(&device, None, None)?;
+        }
+    } else {
+        spawn_reconcile_for_bank_mice(None);
+    }
+    Ok(())
+}
+
+/// Invalidates cached bank verification after a config save, returns any mouse
+/// playing a now-unverified hybrid bank back to `SIDEARM_BANK`, and schedules a
+/// background bank store for the new config.
+pub fn invalidate_and_schedule_bank_store(config: AppConfig, config_dir: PathBuf) {
+    let mut needs_return_to_sidearm = false;
+    for model in CATALOG.iter().copied().filter(|m| m.live.as_ref().is_some_and(|live| live.banks)) {
+        let index = model.catalog_index();
+        VERIFIED_HYBRID_BANKS[index].store(0, Ordering::Release);
+        STORED[index].store(0, Ordering::Release);
+        let sidearm = SIDEARM_BANK[index].load(Ordering::Acquire);
+        let active = ACTIVE_LIVE_BANK[index].load(Ordering::Acquire);
+        if sidearm != 0 && active != 0 && active != sidearm {
+            needs_return_to_sidearm = true;
+        }
+    }
+    {
+        let mut guard = DESIRED_PROFILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(desired) = guard.as_mut() {
+            desired.profile = desired
+                .profile
+                .as_ref()
+                .and_then(|p| config.profiles.iter().find(|c| c.id == p.id && c.enabled).cloned());
+            desired.config = config.clone();
+            desired.revision = next_profile_revision();
+        }
+    }
+    if needs_return_to_sidearm {
+        spawn_reconcile_for_bank_mice(None);
+    }
+    schedule_bank_store(config, config_dir);
 }
 
 /// Mice whose Sidearm bank the user gave back this run: no session claims one
@@ -477,6 +766,175 @@ fn offline_targets(config: &AppConfig, model: &NativeModel, profile_id: &str) ->
         .collect()
 }
 
+/// The profile whose onboard bank is reserved exclusively for clean offline use
+/// (never allowed to hold hybrid Sidearm signals): an explicit `offline_profile_id`
+/// if it points to a real profile, else `fallback_profile_id`.
+pub(crate) fn dedicated_offline_profile_id(config: &AppConfig) -> &str {
+    match config.settings.offline_profile_id.as_deref() {
+        Some(id) if id != crate::config::OFFLINE_PROFILE_ACTIVE && config.profiles.iter().any(|p| p.id == id) => id,
+        _ => config.settings.fallback_profile_id.as_str(),
+    }
+}
+
+/// Whether `profile_id` has an enabled non-Disabled live binding that needs
+/// Sidearm to receive the silent consumer signal on `(control_id, logical)`.
+fn profile_needs_sidearm_signal(config: &AppConfig, profile_id: &str, control: &ControlId, logical: Layer) -> bool {
+    let active_on = |wanted: Layer| {
+        config.bindings.iter().any(|b| {
+            b.enabled
+                && b.profile_id == profile_id
+                && b.control_id == *control
+                && b.layer == wanted
+                && config.actions.iter().any(|a| a.id == b.action_id && a.action_type != ActionType::Disabled)
+        })
+    };
+    match logical {
+        Layer::Standard => active_on(Layer::Standard) || active_on(Layer::Hypershift2),
+        Layer::Hypershift => {
+            active_on(Layer::Hypershift)
+                || active_on(Layer::HypershiftBoth)
+                || (!config.bindings.iter().any(|b| b.enabled && b.profile_id == profile_id && b.control_id == *control && b.layer == Layer::Hypershift)
+                    && active_on(Layer::Standard))
+        }
+        _ => false,
+    }
+}
+
+/// Builds the hybrid bank targets for `profile_id` on a bank model: playable plain
+/// bindings become native firmware records; Sidearm-only bindings (including gestures,
+/// chords, throttled bindings, conditions, and HS2/HS+HS2 overrides) keep their reserved
+/// consumer signals; unbound or Disabled key buttons become silent `Consumer(0)`; firmware
+/// trigger stays `Hypershift` and profile button / non-key HS2 triggers are left untouched.
+pub(crate) fn hybrid_bank_targets(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Vec<(u8, u8, OnboardAction)> {
+    let Some(live) = &model.live else { return Vec::new() };
+    let hs2_triggers: &[String] = config
+        .profiles
+        .iter()
+        .find(|p| p.id == profile_id)
+        .map_or(&[], |p| p.hypershift2_triggers.as_slice());
+    let mut targets = Vec::new();
+    for (index, (control, button)) in controls(model).into_iter().enumerate() {
+        if Some(button) == live.profile_button {
+            continue;
+        }
+        let id = control_id(model, control);
+        let key_button = index < model.key_buttons.len();
+        // Only native mouse buttons can be HS2 triggers; never skip a key button
+        // (skipping a thumb could leave a pre-existing Sidearm signal in flash).
+        if !key_button && hs2_triggers.iter().any(|trigger| trigger.as_str() == id.as_str()) {
+            continue;
+        }
+        for (layer, logical) in [(0u8, Layer::Standard), (1u8, Layer::Hypershift)] {
+            if let Some(native) = crate::mouse_offline::hybrid_native_action(config, model, profile_id, id.as_str(), logical) {
+                targets.push((button, layer, native));
+                continue;
+            }
+            if profile_needs_sidearm_signal(config, profile_id, &id, logical) {
+                if let Some(&usage) = USAGES.get(2 * index + usize::from(layer)) {
+                    targets.push((button, layer, OnboardAction::Consumer(usage)));
+                }
+                continue;
+            }
+            let explicitly_disabled = config.bindings.iter().any(|b| {
+                b.enabled
+                    && b.profile_id == profile_id
+                    && b.control_id == id
+                    && b.layer == logical
+                    && config.actions.iter().any(|a| a.id == b.action_id && a.action_type == ActionType::Disabled)
+            });
+            if key_button || explicitly_disabled {
+                targets.push((button, layer, OnboardAction::Consumer(crate::mouse_offline::BANK_SILENT_USAGE)));
+            }
+        }
+    }
+    if let Some(trigger) = live.firmware_trigger {
+        targets.push((trigger, 0, OnboardAction::Hypershift));
+        targets.push((trigger, 1, OnboardAction::Hypershift));
+    }
+    targets
+}
+
+/// Destination-aware planned bank entry: carries the physical slot, owning profile,
+/// and whether that slot is written as a hybrid hardware bank or a pure offline bank.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PlannedBank<'a> {
+    pub bank: u8,
+    pub profile_id: &'a str,
+    pub hybrid: bool,
+}
+
+/// Physical bank slot claimed by the dedicated offline profile (if linked on `model`).
+/// Defensively reserved so no other profile can turn that slot into a hybrid bank.
+fn dedicated_offline_slot(config: &AppConfig, model: &NativeModel) -> Option<u8> {
+    let dedicated = dedicated_offline_profile_id(config);
+    config
+        .profiles
+        .iter()
+        .find(|p| p.id == dedicated)
+        .and_then(|p| p.device_slots.as_ref()?.get(model.device_id).copied())
+}
+
+/// Profile-level eligibility for hybrid hardware bank mode (before checking the
+/// mouse's bank inventory for at least one other clean user bank): requires a bank
+/// model, consumer signals enabled, an enabled non-dedicated profile linked to a
+/// non-dedicated slot with `hardware_bank == Some(true)`, and at least one explicitly
+/// written layer-0 key button that is NOT Sidearm's own consumer signal (preventing
+/// collision with `sidearm_bank` content detection).
+pub(crate) fn profile_uses_hardware_bank(config: &AppConfig, model: &NativeModel, profile_id: &str) -> bool {
+    if !model.live.as_ref().is_some_and(|live| live.banks) {
+        return false;
+    }
+    if !crate::mouse_memory::consumer_signals_enabled() {
+        return false;
+    }
+    if profile_id == dedicated_offline_profile_id(config) {
+        return false;
+    }
+    let Some(profile) = config.profiles.iter().find(|p| p.id == profile_id && p.enabled) else {
+        return false;
+    };
+    let Some(slot) = profile.device_slots.as_ref().and_then(|slots| slots.get(model.device_id)).copied() else {
+        return false;
+    };
+    if dedicated_offline_slot(config, model) == Some(slot) {
+        return false;
+    }
+    if profile.mouse_for(model.device_id).and_then(|own| own.hardware_bank) != Some(true) {
+        return false;
+    }
+    let targets = hybrid_bank_targets(config, model, profile_id);
+    // Require at least one explicitly written layer-0 key button that is not Sidearm's
+    // own signature signal so `sidearm_bank` can never mistake this bank for Sidearm's.
+    !model.key_buttons.is_empty()
+        && model.key_buttons.iter().any(|&(_, button)| {
+            targets
+                .iter()
+                .any(|&(b, l, action)| (b, l) == (button, 0) && !is_own_signal(model, b, 0, block(action)))
+        })
+}
+
+/// Targets stored in a planned onboard bank: strictly follows `entry.hybrid`.
+fn bank_targets_for(config: &AppConfig, model: &NativeModel, entry: PlannedBank<'_>) -> Vec<(u8, u8, OnboardAction)> {
+    if entry.hybrid {
+        hybrid_bank_targets(config, model, entry.profile_id)
+    } else {
+        offline_targets(config, model, entry.profile_id)
+    }
+}
+
+/// Inspects every address of `bank` on `device` for any of Sidearm's reserved consumer
+/// signals (which never appear in a clean offline bank). Propagates HID read errors
+/// so uncertain reads are never mistaken for a clean bank during crash recovery.
+fn bank_holds_sidearm_signal(device: &VendorDevice, bank: u8) -> Result<bool, String> {
+    let model = device.model();
+    for (button, layer) in bank_addresses(model) {
+        if is_own_signal(model, button, layer, device.read_block(bank, button, layer)?) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Keeps the first error of a mouse that did not answer: the store is retried
 /// once it wakes. Any other refusal is only logged — retrying it every two
 /// seconds would wear the mouse's storage.
@@ -597,18 +1055,21 @@ fn bank_addresses(model: &NativeModel) -> Vec<(u8, u8)> {
         .collect()
 }
 
-/// The bank that plays without Sidearm: the offline profile's, else the one
-/// playing (never Sidearm's own; `banks` has it left out).
-/// `remembered`: the bank that played before Sidearm's, kept for when the
-/// offline profile has no bank of its own (Sidearm's bank playing gives no
-/// other hint).
-fn base_bank(config: &AppConfig, model: &NativeModel, banks: &Banks, remembered: Option<u8>) -> u8 {
+/// The clean bank that plays without Sidearm: the offline profile's, else the one
+/// playing (never Sidearm's own and never a hybrid bank; `banks` has Sidearm's left out).
+/// `remembered`: the bank that played before Sidearm's, kept for when the offline
+/// profile has no bank of its own.
+fn base_bank(config: &AppConfig, model: &NativeModel, banks: &Banks, remembered: Option<u8>) -> Result<u8, String> {
     let offline = crate::mouse_offline::offline_profile_id(config, None);
     let plan = bank_plan(config, model, banks, &offline);
-    match plan.iter().find(|(_, profile)| *profile == offline) {
-        Some(&(bank, _)) => bank,
-        None => remembered.filter(|bank| banks.assigned.contains(bank)).unwrap_or_else(|| exit_bank(&plan, banks, &offline)),
+    let is_clean = |bank: u8| banks.assigned.contains(&bank) && !plan.iter().any(|p| p.bank == bank && p.hybrid);
+    if let Some(entry) = plan.iter().find(|entry| entry.profile_id == offline && !entry.hybrid && banks.assigned.contains(&entry.bank)) {
+        return Ok(entry.bank);
     }
+    if let Some(bank) = remembered.filter(|&bank| is_clean(bank)) {
+        return Ok(bank);
+    }
+    exit_bank(config, &plan, banks, &offline).ok_or_else(|| "No clean offline bank found on the mouse".to_owned())
 }
 
 /// Makes Sidearm's bank hold `base`'s records with `targets` over them, writing
@@ -655,7 +1116,7 @@ fn sync_sidearm_bank(device: &VendorDevice, bank: u8, base: u8, targets: &[(u8, 
 fn claim_sidearm_bank(device: &VendorDevice, config: &AppConfig, targets: &[(u8, u8, OnboardAction)], config_dir: &Path) -> Result<Option<(u8, u8)>, String> {
     let model = device.model();
     let (banks, sidearm) = user_banks(device)?;
-    let base = base_bank(config, model, &banks, remembered_base(config_dir, model));
+    let base = base_bank(config, model, &banks, remembered_base(config_dir, model))?;
     let (bank, created) = match sidearm {
         Some(bank) => (bank, false),
         None => {
@@ -680,40 +1141,136 @@ fn claim_sidearm_bank(device: &VendorDevice, config: &AppConfig, targets: &[(u8,
     Ok(Some((bank, base)))
 }
 
-/// Marks that the mouse of `model` plays Sidearm's bank: a restorer finding it
-/// after a kill selects the bank that plays without Sidearm.
+/// Marks that the mouse of `model` plays Sidearm's bank (and optionally any
+/// managed hybrid bank selected this run): a restorer finding it after a kill
+/// selects the verified clean bank that plays without Sidearm.
 fn in_sidearm_bank_marker(config_dir: &Path, model: &NativeModel) -> PathBuf {
     config_dir.join(format!("{}-in-sidearm-bank", model.device_id))
 }
 
+#[derive(Debug, Default)]
+struct SidearmBankMarker {
+    sidearm: Option<u8>,
+    base: Option<u8>,
+    hybrids: Vec<u8>,
+}
+
+fn read_sidearm_bank_marker(config_dir: &Path, model: &NativeModel) -> SidearmBankMarker {
+    let Ok(text) = std::fs::read_to_string(in_sidearm_bank_marker(config_dir, model)) else {
+        return SidearmBankMarker::default();
+    };
+    let mut parts = text.split_whitespace();
+    let sidearm = parts.next().and_then(|s| s.parse().ok());
+    let base = parts.next().and_then(|s| s.parse().ok());
+    let hybrids = parts
+        .next()
+        .map(|csv| csv.split(',').filter_map(|s| s.parse::<u8>().ok()).collect())
+        .unwrap_or_default();
+    SidearmBankMarker { sidearm, base, hybrids }
+}
+
+fn write_sidearm_bank_marker(config_dir: &Path, model: &NativeModel, bank: u8, base: u8, hybrids: &[u8]) {
+    let text = if hybrids.is_empty() {
+        format!("{bank} {base}")
+    } else {
+        let csv: Vec<String> = hybrids.iter().map(u8::to_string).collect();
+        format!("{bank} {base} {}", csv.join(","))
+    };
+    crate::mouse_offline::write_marker(&in_sidearm_bank_marker(config_dir, model), &text);
+}
+
 /// Writes the marker before Sidearm's bank is selected (a kill in between
-/// must still find it): Sidearm's bank and the one that played before it.
+/// must still find it): Sidearm's bank and the clean one that played before it.
 fn mark_in_sidearm_bank(config_dir: &Path, model: &NativeModel, bank: u8, base: u8) {
-    crate::mouse_offline::write_marker(&in_sidearm_bank_marker(config_dir, model), &format!("{bank} {base}"));
+    let mut marker = read_sidearm_bank_marker(config_dir, model);
+    marker.hybrids.retain(|&b| b != bank && b != base);
+    write_sidearm_bank_marker(config_dir, model, bank, base, &marker.hybrids);
+}
+
+/// Records `hybrid_bank` in the recovery marker BEFORE switching into it so a
+/// crash or config change before the next store still knows that bank is managed.
+fn record_managed_hybrid_bank(config_dir: &Path, model: &NativeModel, sidearm: u8, hybrid_bank: u8) {
+    let mut marker = read_sidearm_bank_marker(config_dir, model);
+    let base = marker.base.unwrap_or(1);
+    if !marker.hybrids.contains(&hybrid_bank) {
+        marker.hybrids.push(hybrid_bank);
+        marker.hybrids.sort_unstable();
+    }
+    write_sidearm_bank_marker(config_dir, model, marker.sidearm.unwrap_or(sidearm), base, &marker.hybrids);
 }
 
 /// The bank that played before Sidearm's, as the marker keeps it.
 fn remembered_base(config_dir: &Path, model: &NativeModel) -> Option<u8> {
-    std::fs::read_to_string(in_sidearm_bank_marker(config_dir, model)).ok()?.split_whitespace().nth(1)?.parse().ok()
+    read_sidearm_bank_marker(config_dir, model).base
 }
 
-/// Selects the bank that plays without Sidearm when Sidearm's bank plays, and
-/// drops the marker. `config` (else the one in `config_dir`) names that bank.
+/// Selects a verified clean offline bank when the mouse is currently playing
+/// Sidearm's own bank or a profile's hybrid hardware bank, and removes the
+/// marker only after confirmed restoration.
+/// `config` (else the one in `config_dir`) names that bank.
 fn leave_sidearm_bank(device: &VendorDevice, config: Option<&AppConfig>, config_dir: &Path) -> Result<(), String> {
     let model = device.model();
     let (banks, sidearm) = user_banks(device)?;
-    if let Some(bank) = sidearm.filter(|&bank| bank == banks.active) {
-        let from_disk = config.is_none().then(|| crate::config::read_and_migrate_config_file(&config_dir.join("config.json")).ok()).flatten();
-        let remembered = remembered_base(config_dir, model);
-        let base = match config.or(from_disk.as_ref()) {
-            Some(config) => base_bank(config, model, &banks, remembered),
-            None => match remembered.filter(|bank| banks.assigned.contains(bank)) {
-                Some(bank) => bank,
-                None => *banks.assigned.first().ok_or("The mouse holds no bank but Sidearm's")?,
-            },
-        };
+    let marker = read_sidearm_bank_marker(config_dir, model);
+    let from_disk = config.is_none().then(|| crate::config::read_and_migrate_config_file(&config_dir.join("config.json")).ok()).flatten();
+    let effective_config = config.or(from_disk.as_ref());
+    let on_sidearm = sidearm == Some(banks.active);
+    let on_marker_hybrid = !on_sidearm && marker.hybrids.contains(&banks.active);
+    let on_config_hybrid = !on_sidearm
+        && effective_config.is_some_and(|cfg| {
+            let offline = crate::mouse_offline::offline_profile_id(cfg, None);
+            bank_plan(cfg, model, &banks, &offline).iter().any(|p| p.bank == banks.active && p.hybrid)
+        });
+    let on_signal_hybrid = if !on_sidearm && !on_marker_hybrid && !on_config_hybrid && effective_config.is_none() {
+        bank_holds_sidearm_signal(device, banks.active)?
+    } else {
+        false
+    };
+    if on_sidearm || on_marker_hybrid || on_config_hybrid || on_signal_hybrid {
+        let playing = banks.active;
+        let mut candidates: Vec<u8> = Vec::new();
+        if let Some(cfg) = effective_config
+            && let Ok(preferred) = base_bank(cfg, model, &banks, marker.base)
+        {
+            candidates.push(preferred);
+        }
+        if let Some(rem) = marker.base
+            && banks.assigned.contains(&rem)
+            && !candidates.contains(&rem)
+        {
+            candidates.push(rem);
+        }
+        for &bank in &banks.assigned {
+            if !candidates.contains(&bank) {
+                candidates.push(bank);
+            }
+        }
+        // Pick the first candidate that is not the unclean playing bank, not in
+        // config's hybrid set, and verified in flash to hold zero Sidearm signals.
+        let mut chosen = None;
+        for bank in candidates {
+            if bank == playing || Some(bank) == sidearm {
+                continue;
+            }
+            if let Some(cfg) = effective_config {
+                let offline = crate::mouse_offline::offline_profile_id(cfg, None);
+                if bank_plan(cfg, model, &banks, &offline).iter().any(|p| p.bank == bank && p.hybrid) {
+                    continue;
+                }
+            }
+            if bank_holds_sidearm_signal(device, bank)? {
+                continue;
+            }
+            chosen = Some(bank);
+            break;
+        }
+        let base = chosen.ok_or_else(|| "No verified clean offline bank available to restore".to_owned())?;
         select_bank(device, base)?;
-        log::info!("[naga-live] {} left the Sidearm bank {bank}: bank {base} plays", model.name);
+        if on_sidearm {
+            log::info!("[naga-live] {} left the Sidearm bank {playing}: bank {base} plays", model.name);
+        } else {
+            log::info!("[naga-live] {} left the hybrid bank {playing}: bank {base} plays", model.name);
+        }
     }
     match std::fs::remove_file(in_sidearm_bank_marker(config_dir, model)) {
         Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.to_string()),
@@ -735,27 +1292,74 @@ fn select_bank(device: &VendorDevice, bank: u8) -> Result<(), String> {
     Ok(())
 }
 
-/// The bank to play after exit: the offline profile's own bank, else the one
-/// that was playing.
-pub(crate) fn exit_bank(plan: &[(u8, &str)], banks: &Banks, offline_profile: &str) -> u8 {
-    // Sidearm's own bank playing (left out of `assigned`) is no bank to stay on.
-    let playing = if banks.assigned.contains(&banks.active) { banks.active } else { banks.assigned.first().copied().unwrap_or(banks.active) };
-    plan.iter().find(|(_, profile)| *profile == offline_profile).map_or(playing, |(bank, _)| *bank)
+/// The clean offline bank to play after exit: never Sidearm's own bank and never a
+/// hybrid `hardware_bank` slot (even when `offline_profile_id == "@active"`).
+/// Returns `None` if no clean assigned user bank exists.
+pub(crate) fn exit_bank(
+    config: &AppConfig,
+    plan: &[PlannedBank<'_>],
+    banks: &Banks,
+    offline_profile: &str,
+) -> Option<u8> {
+    let is_clean = |bank: u8| banks.assigned.contains(&bank) && !plan.iter().any(|p| p.bank == bank && p.hybrid);
+    if let Some(entry) = plan.iter().find(|entry| entry.profile_id == offline_profile && is_clean(entry.bank)) {
+        return Some(entry.bank);
+    }
+    let dedicated = dedicated_offline_profile_id(config);
+    if let Some(entry) = plan.iter().find(|entry| entry.profile_id == dedicated && is_clean(entry.bank)) {
+        return Some(entry.bank);
+    }
+    if is_clean(banks.active) {
+        return Some(banks.active);
+    }
+    banks.assigned.iter().copied().find(|&bank| is_clean(bank))
 }
 
-/// Which profile each bank gets on exit: every profile linked to a bank, or —
-/// with one bank and no link — the offline profile.
-pub(crate) fn bank_plan<'a>(config: &'a AppConfig, model: &NativeModel, banks: &Banks, offline_profile: &'a str) -> Vec<(u8, &'a str)> {
-    let linked: Vec<(u8, &str)> = config
-        .profiles
-        .iter()
-        .filter_map(|profile| {
-            let bank = *profile.device_slots.as_ref()?.get(model.device_id)?;
-            banks.assigned.contains(&bank).then_some((bank, profile.id.as_str()))
-        })
-        .collect();
+/// Which profile and mode each bank gets: every profile linked to an assigned user
+/// bank, or — with one user bank and no link — the offline profile (ALWAYS pure
+/// offline, never hybrid).
+/// Enforces two invariants defensively:
+/// 1. At most one profile owns any physical bank slot (the dedicated offline profile
+///    wins ties if a hand-edited config contains duplicates).
+/// 2. At least one assigned user bank remains clean (non-hybrid); if enabling hybrid
+///    on every requested slot would leave zero clean user banks, hybrid is refused
+///    so offline restoration always has a guaranteed clean destination.
+pub(crate) fn bank_plan<'a>(config: &'a AppConfig, model: &NativeModel, banks: &Banks, offline_profile: &'a str) -> Vec<PlannedBank<'a>> {
+    let dedicated = dedicated_offline_profile_id(config);
+    let mut linked: Vec<PlannedBank<'a>> = Vec::new();
+    // Reserve the dedicated offline profile's slot first so no other profile can claim it.
+    if let Some(profile) = config.profiles.iter().find(|p| p.id == dedicated)
+        && let Some(&bank) = profile.device_slots.as_ref().and_then(|slots| slots.get(model.device_id))
+        && banks.assigned.contains(&bank)
+    {
+        linked.push(PlannedBank { bank, profile_id: profile.id.as_str(), hybrid: false });
+    }
+    for profile in &config.profiles {
+        if profile.id == dedicated {
+            continue;
+        }
+        let Some(&bank) = profile.device_slots.as_ref().and_then(|slots| slots.get(model.device_id)) else {
+            continue;
+        };
+        if !banks.assigned.contains(&bank) || linked.iter().any(|entry| entry.bank == bank) {
+            continue;
+        }
+        let hybrid = profile_uses_hardware_bank(config, model, &profile.id);
+        linked.push(PlannedBank { bank, profile_id: profile.id.as_str(), hybrid });
+    }
     if linked.is_empty() && banks.assigned.len() == 1 {
-        return vec![(banks.assigned[0], offline_profile)];
+        return vec![PlannedBank { bank: banks.assigned[0], profile_id: offline_profile, hybrid: false }];
+    }
+    // Single-clean-bank invariant: hybrid storage is allowed ONLY when at least one
+    // assigned user bank on the mouse stays clean (non-hybrid).
+    let has_clean_bank = banks
+        .assigned
+        .iter()
+        .any(|&bank| !linked.iter().any(|entry| entry.bank == bank && entry.hybrid));
+    if !has_clean_bank {
+        for entry in &mut linked {
+            entry.hybrid = false;
+        }
     }
     linked
 }
@@ -820,14 +1424,24 @@ fn bank_dpi(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Option
 }
 
 /// A fingerprint of what a store of `model`'s banks writes: the banks, each
-/// planned bank's records and DPI.
+/// planned bank's mode, records and DPI.
 fn store_key(config: &AppConfig, model: &NativeModel, banks: &Banks, offline_profile: &str) -> u64 {
     use std::hash::{Hash, Hasher};
     let plan = bank_plan(config, model, banks, offline_profile);
-    let what: Vec<_> = plan.iter().map(|&(bank, profile)| (bank, offline_targets(config, model, profile), bank_dpi(config, model, profile))).collect();
+    let what: Vec<_> = plan
+        .iter()
+        .map(|&entry| (entry.bank, entry.hybrid, bank_targets_for(config, model, entry), bank_dpi(config, model, entry.profile_id)))
+        .collect();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     format!("{:?}{what:?}", banks.assigned).hash(&mut hasher);
     hasher.finish().max(1)
+}
+
+/// Bitmask of verified hybrid banks from a verified `plan`.
+fn verified_hybrid_mask(plan: &[PlannedBank<'_>]) -> u8 {
+    plan.iter()
+        .filter(|entry| entry.hybrid && (1..=MAX_BANKS).contains(&entry.bank))
+        .fold(0u8, |mask, entry| mask | (1u8 << entry.bank))
 }
 
 /// Stores the offline banks of every bank mouse in the background, once the
@@ -835,6 +1449,7 @@ fn store_key(config: &AppConfig, model: &NativeModel, banks: &Banks, offline_pro
 /// bank. Only beside Sidearm's own bank: on the live-map path the playing bank
 /// is the user's, and writing it would replace the live map.
 pub fn schedule_bank_store(config: AppConfig, config_dir: PathBuf) {
+    *SESSION_CONFIG_DIR.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(config_dir.clone());
     let generation = STORE_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
     let spawned = thread::Builder::new().name("bank-store".into()).spawn(move || {
         thread::sleep(STORE_PAUSE);
@@ -845,11 +1460,24 @@ pub fn schedule_bank_store(config: AppConfig, config_dir: PathBuf) {
         let offline = crate::mouse_offline::offline_profile_id(&config, None);
         for model in CATALOG.iter().copied().filter(|model| model.live.as_ref().is_some_and(|live| live.banks) && configured(&config, model)) {
             let stored = VendorDevice::open_model(model).and_then(|device| {
-                // Only while Sidearm's own bank plays: in keyboard-fallback mode,
-                // or offline, the playing bank is the user's and writing it would
-                // replace the live map.
+                // Re-check generation, shutdown, and session ownership AFTER
+                // acquiring the device lock so a superseded or relinquished
+                // store never writes flash.
+                let index = model.catalog_index();
+                if STORE_GENERATION.load(Ordering::Acquire) != generation
+                    || crate::is_shutting_down()
+                    || RELEASED[index].load(Ordering::Acquire)
+                    || OFFLINE[index].load(Ordering::Acquire) != 0
+                {
+                    return Ok(false);
+                }
+                let sidearm_owned = SIDEARM_BANK[index].load(Ordering::Acquire);
+                let expected = ACTIVE_LIVE_BANK[index].load(Ordering::Acquire);
+                if sidearm_owned == 0 || expected == 0 {
+                    return Ok(false);
+                }
                 let (banks, sidearm) = user_banks(&device)?;
-                if sidearm != Some(banks.active) {
+                if sidearm != Some(sidearm_owned) || banks.active != expected {
                     return Ok(false);
                 }
                 store_banks(&device, &config, model, &offline, &config_dir, false).map(|()| true)
@@ -884,6 +1512,7 @@ fn store_banks(
     let (banks, _) = user_banks(device)?;
     let plan = bank_plan(config, model, &banks, offline_profile);
     let key = store_key(config, model, &banks, offline_profile);
+    let index = model.catalog_index();
     let mut asleep = None;
     // Whether a write had Sidearm's bank play instead of the bank it wrote.
     let mut moved = false;
@@ -896,12 +1525,28 @@ fn store_banks(
     }
     // A save that left this mouse's banks as they were (another mouse's, a
     // setting) stores nothing: every bank was read back record by record.
-    if STORED[model.catalog_index()].load(Ordering::Acquire) == key {
+    if STORED[index].load(Ordering::Acquire) == key {
         log::info!("[mouse-offline] {} banks already stored in the background", model.name);
+        VERIFIED_HYBRID_BANKS[index].store(verified_hybrid_mask(&plan), Ordering::Release);
     } else {
-        moved = store_planned_banks(device, config, model, &banks, &plan, config_dir, &mut asleep)?;
-        if asleep.is_none() {
-            STORED[model.catalog_index()].store(key, Ordering::Release);
+        match store_planned_banks(device, config, model, &banks, &plan, config_dir, &mut asleep, &mut moved) {
+            Ok(()) => {
+                if asleep.is_none() {
+                    STORED[index].store(key, Ordering::Release);
+                    VERIFIED_HYBRID_BANKS[index].store(verified_hybrid_mask(&plan), Ordering::Release);
+                }
+            }
+            Err(error) => {
+                // Reconcile ACTIVE_LIVE_BANK to actual hardware bank before
+                // returning so the Session monitor never mistakes our move to
+                // SIDEARM_BANK for a manual profile-button press.
+                if moved && SIDEARM_BANK[index].load(Ordering::Acquire) != 0
+                    && let Ok(current) = active_bank(device)
+                {
+                    ACTIVE_LIVE_BANK[index].store(current, Ordering::Release);
+                }
+                return Err(error);
+            }
         }
     }
     // The records are stored either way; playing them at once is a
@@ -909,13 +1554,37 @@ fn store_banks(
     // Sidearm's own bank played for a write: the bank that played before
     // comes back (an exit's own bank wins below).
     let exit_select = exiting && !plan.is_empty();
-    if moved && !exit_select && let Err(error) = select_bank(device, banks.active) {
-        log::warn!("[mouse-offline] {} bank {} not reselected after storing: {error}", model.name, banks.active);
-        note_asleep(&mut asleep, error);
+    if moved && !exit_select {
+        match select_bank(device, banks.active) {
+            Ok(()) => {
+                if SIDEARM_BANK[index].load(Ordering::Acquire) != 0 {
+                    ACTIVE_LIVE_BANK[index].store(banks.active, Ordering::Release);
+                }
+            }
+            Err(error) => {
+                log::warn!("[mouse-offline] {} bank {} not reselected after storing: {error}", model.name, banks.active);
+                if SIDEARM_BANK[index].load(Ordering::Acquire) != 0
+                    && let Ok(current) = active_bank(device)
+                {
+                    ACTIVE_LIVE_BANK[index].store(current, Ordering::Release);
+                }
+                note_asleep(&mut asleep, error);
+            }
+        }
     }
-    if exit_select && let Err(error) = select_bank(device, exit_bank(&plan, &banks, offline_profile)) {
-        log::warn!("[mouse-offline] {} bank not reselected after storing: {error}", model.name);
-        note_asleep(&mut asleep, error);
+    if exit_select {
+        let dest = exit_bank(config, &plan, &banks, offline_profile)
+            .ok_or_else(|| "No verified clean offline bank available for exit".to_owned())?;
+        if let Err(error) = select_bank(device, dest) {
+            log::warn!("[mouse-offline] {} bank {dest} not reselected after storing: {error}", model.name);
+            note_asleep(&mut asleep, error);
+        }
+    } else if !exiting && asleep.is_none() {
+        // Now that hybrid banks are verified stored, immediately apply any
+        // desired hybrid profile waiting for verification.
+        if let Err(error) = reconcile_on_device(device, Some(config_dir), None) {
+            log::warn!("[naga-live] {} desired profile not reconciled after bank store: {error}", model.name);
+        }
     }
     asleep.map_or(Ok(()), Err)
 }
@@ -923,36 +1592,43 @@ fn store_banks(
 /// Before `bank` is written: when it plays and the mouse has Sidearm's own bank,
 /// that one plays meanwhile. Writing the playing bank changes the live map at
 /// once, and a record rewritten under a held button strands its key (a stuck
-/// Ctrl). Returns whether it switched.
+/// Ctrl). Waits for held inputs before switching. Returns whether it switched.
 fn off_the_playing_bank(device: &VendorDevice, bank: u8) -> Result<bool, String> {
     let banks = read_banks(device)?;
     if banks.active != bank {
         return Ok(false);
     }
     let Some(sidearm) = sidearm_bank(device, &banks)? else { return Ok(false) };
+    let model = device.model();
+    wait_released(model);
     select_bank(device, sidearm)?;
-    log::info!("[mouse-offline] {} Sidearm bank {sidearm} plays while bank {bank} is written", device.model().name);
+    let index = model.catalog_index();
+    if SIDEARM_BANK[index].load(Ordering::Acquire) != 0 {
+        ACTIVE_LIVE_BANK[index].store(sidearm, Ordering::Release);
+    }
+    log::info!("[mouse-offline] {} Sidearm bank {sidearm} plays while bank {bank} is written", model.name);
     Ok(true)
 }
 
 /// The writes of [`store_banks`]: unlinked banks get their records back, each
 /// planned bank its profile and DPI.
+#[allow(clippy::too_many_arguments)]
 fn store_planned_banks(
     device: &VendorDevice,
     config: &AppConfig,
     model: &'static NativeModel,
     banks: &Banks,
-    plan: &[(u8, &str)],
+    plan: &[PlannedBank<'_>],
     config_dir: &Path,
     asleep: &mut Option<String>,
-) -> Result<bool, String> {
-    let mut moved = false;
+    moved: &mut bool,
+) -> Result<(), String> {
     // A bank no profile is linked to any more gets its own records back: what
     // Sidearm stored there earlier (an old turbo record included) would play on.
-    for &bank in banks.assigned.iter().filter(|&&bank| !plan.iter().any(|&(planned, _)| planned == bank)) {
+    for &bank in banks.assigned.iter().filter(|&&bank| !plan.iter().any(|entry| entry.bank == bank)) {
         let backup = bank_backup(config_dir, model, bank);
         if backup.exists() && let Err(error) = off_the_playing_bank(device, bank).and_then(|switched| {
-            moved |= switched;
+            *moved |= switched;
             restore_bank(device, bank, &backup)
         }) {
             log::warn!("[mouse-offline] {} unlinked bank {bank} not restored: {error}", model.name);
@@ -961,11 +1637,13 @@ fn store_planned_banks(
     }
     if plan.is_empty() {
         log::info!("[mouse-offline] {} keeps its {} onboard profiles: none is linked", model.name, banks.assigned.len());
-        return Ok(moved);
+        return Ok(());
     }
-    for &(bank, profile_id) in plan {
+    for &entry in plan {
+        let bank = entry.bank;
+        let profile_id = entry.profile_id;
         let backup = bank_backup(config_dir, model, bank);
-        let targets = offline_targets(config, model, profile_id);
+        let targets = bank_targets_for(config, model, entry);
         let already_stored = load_snapshot(device, &backup)?.is_some_and(|snapshot| {
             snapshot.records.len() == targets.len()
                 && snapshot.records.iter().zip(&targets).all(|(record, &(button, layer, action))| {
@@ -974,7 +1652,7 @@ fn store_planned_banks(
                 && verify_bank(device, bank, &snapshot.records).is_ok()
         });
         if !already_stored {
-            moved |= off_the_playing_bank(device, bank)?;
+            *moved |= off_the_playing_bank(device, bank)?;
             apply_bank(device, bank, &backup, &targets)?;
         }
         log::info!("[mouse-offline] {} profile `{profile_id}` verified in bank {bank}: {} records", model.name, targets.len());
@@ -990,7 +1668,7 @@ fn store_planned_banks(
             }
         }
     }
-    Ok(moved)
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1447,6 +2125,7 @@ impl Session {
                         let device = open()?;
                         match claim_sidearm_bank(&device, &session_config, &worker_targets, &config_dir)? {
                             Some((bank, base)) => {
+                                *SESSION_CONFIG_DIR.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(config_dir.clone());
                                 mark_in_sidearm_bank(&config_dir, model, bank, base);
                                 select_bank(&device, bank)?;
                                 // The bank switch reloaded the live map: a rollback of an older one is moot.
@@ -1455,6 +2134,12 @@ impl Session {
                                 }
                                 log::info!("[naga-live] {} plays the Sidearm bank {bank}", model.name);
                                 *sidearm = Some(bank);
+                                SIDEARM_BANK[index].store(bank, Ordering::Release);
+                                ACTIVE_LIVE_BANK[index].store(bank, Ordering::Release);
+                                // Replay any desired profile if hybrid banks are already verified.
+                                if let Err(error) = reconcile_on_device(&device, Some(&config_dir), None) {
+                                    log::warn!("[naga-live] {} initial desired profile reconcile skipped: {error}", model.name);
+                                }
                                 // Bring the offline banks up to date now, so the exit only selects one.
                                 schedule_bank_store(session_config.clone(), config_dir.clone());
                                 return Ok(());
@@ -1522,16 +2207,31 @@ impl Session {
                             if stopped.recv_timeout(RETRY) != Err(mpsc::RecvTimeoutError::Timeout) {
                                 break 'session;
                             }
-                            match open().and_then(|device| active_bank(&device)) {
-                                Ok(playing) if playing != bank && !away => {
+                            let observed = open().and_then(|device| {
+                                let expected = ACTIVE_LIVE_BANK[index].load(Ordering::Acquire);
+                                let playing = active_bank(&device)?;
+                                Ok((expected, playing))
+                            });
+                            match observed {
+                                Ok((expected, playing)) if expected != 0 && playing != expected && !away => {
                                     log::warn!("[naga-live] {} plays bank {playing} (profile button): offline until the Sidearm bank {bank} plays again", model.name);
                                     away = true;
                                     set_offline(model, bank);
                                 }
-                                Ok(playing) if playing == bank && away => {
-                                    log::info!("[naga-live] {} plays the Sidearm bank {bank} again", model.name);
+                                Ok((expected, playing)) if away && (playing == bank || (expected != 0 && playing == expected)) => {
+                                    if playing == bank {
+                                        log::info!("[naga-live] {} plays the Sidearm bank {playing} again", model.name);
+                                    } else {
+                                        log::info!("[naga-live] {} plays the hybrid bank {playing} again", model.name);
+                                    }
+                                    ACTIVE_LIVE_BANK[index].store(playing, Ordering::Release);
                                     away = false;
                                     set_offline(model, 0);
+                                    if let Ok(device) = open()
+                                        && let Err(error) = reconcile_on_device(&device, Some(&config_dir), None)
+                                    {
+                                        log::warn!("[naga-live] {} desired profile not reconciled after returning online: {error}", model.name);
+                                    }
                                 }
                                 _ => {}
                             }
@@ -1575,6 +2275,9 @@ impl Session {
                     }
                 }
                 READY[index].store(false, Ordering::Release);
+                SIDEARM_BANK[index].store(0, Ordering::Release);
+                ACTIVE_LIVE_BANK[index].store(0, Ordering::Release);
+                VERIFIED_HYBRID_BANKS[index].store(0, Ordering::Release);
                 log_dropped(model, started, "stopped before it was ready");
                 set_offline(model, 0);
                 if sidearm.is_some()
@@ -1978,16 +2681,19 @@ pub(crate) mod tests {
         let mut config = config_with_v3();
         let one = Banks { assigned: vec![1], active: 1 };
         let three = Banks { assigned: vec![1, 2, 3], active: 2 };
-        assert_eq!(bank_plan(&config, &NAGA_V3_PRO, &one, "main"), [(1, "main")]);
+        assert_eq!(bank_plan(&config, &NAGA_V3_PRO, &one, "main"), [PlannedBank { bank: 1, profile_id: "main", hybrid: false }]);
         assert!(bank_plan(&config, &NAGA_V3_PRO, &three, "main").is_empty(), "unlinked banks are preserved");
         let profile = config.profiles[0].id.clone();
         config.profiles[0].device_slots = Some([(NAGA_V3_PRO.device_id.to_owned(), 2)].into());
-        assert_eq!(bank_plan(&config, &NAGA_V3_PRO, &three, "main"), [(2, profile.as_str())]);
+        assert_eq!(bank_plan(&config, &NAGA_V3_PRO, &three, "main"), [PlannedBank { bank: 2, profile_id: profile.as_str(), hybrid: false }]);
         assert!(bank_plan(&config, &NAGA_V3_PRO, &Banks { assigned: vec![1, 3], active: 1 }, "main").is_empty(),
             "a link to a bank the mouse does not hold is ignored");
-        let plan = [(2, "code"), (3, "game")];
-        assert_eq!(exit_bank(&plan, &three, "game"), 3, "the offline profile's bank plays after exit");
-        assert_eq!(exit_bank(&plan, &three, "main"), 2, "else the bank that was playing");
+        let plan = [
+            PlannedBank { bank: 2, profile_id: "code", hybrid: false },
+            PlannedBank { bank: 3, profile_id: "game", hybrid: false },
+        ];
+        assert_eq!(exit_bank(&config, &plan, &three, "game"), Some(3), "the offline profile's bank plays after exit");
+        assert_eq!(exit_bank(&config, &plan, &three, "main"), Some(2), "else the bank that was playing");
     }
 
     #[test]
@@ -2277,6 +2983,171 @@ pub(crate) mod tests {
         drop(guard);
     }
 
+    /// Stage 3 P0 hardware probe: verifies on a real Naga V3 Pro that a single
+    /// onboard bank can hold BOTH native key records (thumb 12 L0 = F24, L1 = Ctrl+C)
+    /// and silent consumer signals (thumb 11 L0/L1) alongside firmware HyperShift
+    /// (0x39), that `select_bank` loads all of them into `LIVE_BANK` cleanly and
+    /// switches back and forth fast, and that restoring the original bank + deleting
+    /// the temporary bank (`05:03`) leaves the mouse unchanged (even on panic).
+    /// Non-interactive by default; set `SIDEARM_PROBE_INTERACTIVE=1` to also prompt
+    /// for manual button presses.
+    /// Run: `cargo test --manifest-path src-tauri/Cargo.toml v3_hybrid_bank_probe -- --ignored --nocapture --test-threads=1`.
+    #[test]
+    #[ignore]
+    fn v3_hybrid_bank_probe() {
+        const THUMB_11: u8 = 0x4a;
+        const THUMB_12: u8 = 0x4b;
+        const RING_TRIGGER: u8 = 0x39;
+        const USAGE_F24: u8 = 0x73;
+        const USAGE_C: u8 = 0x06;
+        const CONSUMER_L0: u16 = 0x0010;
+        const CONSUMER_L1: u16 = 0x0011;
+        let interactive = std::env::var_os("SIDEARM_PROBE_INTERACTIVE").is_some();
+
+        let device = VendorDevice::open_model(&NAGA_V3_PRO).expect("turn the V3 Pro on");
+        let before = read_banks(&device).expect("read banks");
+        let free = (1..=MAX_BANKS)
+            .find(|bank| !before.assigned.contains(bank))
+            .expect("the V3 Pro needs at least one free bank slot (out of 5)");
+        println!("banks before: {before:?}; allocating temporary probe slot {free}");
+        let saved_live_11_0 = device.read_block(LIVE_BANK, THUMB_11, 0).expect("live thumb 11 L0");
+        let saved_live_11_1 = device.read_block(LIVE_BANK, THUMB_11, 1).expect("live thumb 11 L1");
+        let saved_live_12_0 = device.read_block(LIVE_BANK, THUMB_12, 0).expect("live thumb 12 L0");
+        let saved_live_12_1 = device.read_block(LIVE_BANK, THUMB_12, 1).expect("live thumb 12 L1");
+
+        struct RestoreHybrid(VendorDevice, u8, u8, [(u8, u8, [u8; 7]); 4]);
+        impl Drop for RestoreHybrid {
+            fn drop(&mut self) {
+                let RestoreHybrid(device, old, free, saved) = self;
+                if read_banks(device).is_ok_and(|banks| banks.active != *old)
+                    && let Err(error) = select_bank(device, *old)
+                {
+                    println!("!! bank {old} not reselected: {error}");
+                }
+                if read_banks(device).is_ok_and(|banks| banks.assigned.contains(free))
+                    && let Err(error) = delete_bank(device, *free)
+                {
+                    println!("!! bank {free} not deleted: {error}");
+                }
+                for (btn, layer, rec) in saved {
+                    let _ = device.set_block(LIVE_BANK, *btn, *layer, rec);
+                }
+                println!("restored: banks {:?}", read_banks(device));
+            }
+        }
+        let guard = RestoreHybrid(
+            device,
+            before.active,
+            free,
+            [
+                (THUMB_11, 0, saved_live_11_0),
+                (THUMB_11, 1, saved_live_11_1),
+                (THUMB_12, 0, saved_live_12_0),
+                (THUMB_12, 1, saved_live_12_1),
+            ],
+        );
+        let device = &guard.0;
+
+        create_bank(device, free).expect("create probe bank");
+        let want_12_0 = bank_block(free, OnboardAction::Key { modifier: 0, usage: USAGE_F24 });
+        let want_12_1 = bank_block(free, OnboardAction::Key { modifier: 0x01, usage: USAGE_C });
+        let want_11_0 = bank_block(free, OnboardAction::Consumer(CONSUMER_L0));
+        let want_11_1 = bank_block(free, OnboardAction::Consumer(CONSUMER_L1));
+        let want_hs = bank_block(free, OnboardAction::Hypershift);
+
+        write_bank(device, free, THUMB_12, 0, want_12_0).expect("write native F24 to thumb 12 L0");
+        write_bank(device, free, THUMB_12, 1, want_12_1).expect("write native Ctrl+C to thumb 12 L1");
+        write_bank(device, free, THUMB_11, 0, want_11_0).expect("write consumer L0 to thumb 11");
+        write_bank(device, free, THUMB_11, 1, want_11_1).expect("write consumer L1 to thumb 11");
+        write_bank(device, free, RING_TRIGGER, 0, want_hs).expect("write firmware HS L0");
+        write_bank(device, free, RING_TRIGGER, 1, want_hs).expect("write firmware HS L1");
+
+        let t0 = std::time::Instant::now();
+        select_bank(device, free).expect("select hybrid probe bank");
+        let switch_to_hybrid_ms = t0.elapsed().as_millis();
+
+        let live_11_0 = device.read_block(LIVE_BANK, THUMB_11, 0).expect("live thumb 11 L0");
+        let live_11_1 = device.read_block(LIVE_BANK, THUMB_11, 1).expect("live thumb 11 L1");
+        let live_12_0 = device.read_block(LIVE_BANK, THUMB_12, 0).expect("live thumb 12 L0");
+        let live_12_1 = device.read_block(LIVE_BANK, THUMB_12, 1).expect("live thumb 12 L1");
+        let live_hs = device.read_block(LIVE_BANK, RING_TRIGGER, 0).expect("live ring trigger L0");
+        println!("selected hybrid bank {free} in {switch_to_hybrid_ms} ms");
+        println!("  live thumb 11 L0 (consumer 0x0010): {live_11_0:02x?}");
+        println!("  live thumb 11 L1 (consumer 0x0011): {live_11_1:02x?}");
+        println!("  live thumb 12 L0 (native F24):      {live_12_0:02x?}");
+        println!("  live thumb 12 L1 (native Ctrl+C):   {live_12_1:02x?}");
+        println!("  live ring 0x39 L0 (hypershift):     {live_hs:02x?}");
+
+        assert_eq!(live_11_0, want_11_0, "thumb 11 L0 consumer mismatch");
+        assert_eq!(live_11_1, want_11_1, "thumb 11 L1 consumer mismatch");
+        assert_eq!(live_12_0, want_12_0, "thumb 12 L0 F24 mismatch");
+        assert_eq!(live_12_1, want_12_1, "thumb 12 L1 Ctrl+C mismatch");
+        assert_eq!(live_hs, want_hs, "ring trigger hypershift mismatch");
+
+        if interactive {
+            println!("\n>>> Press thumb 11 and thumb 12 if desired, then press Enter:");
+            let mut line = String::new();
+            let _ = std::io::stdin().read_line(&mut line);
+        }
+
+        let t1 = std::time::Instant::now();
+        select_bank(device, before.active).expect("reselect original bank");
+        let switch_back_ms = t1.elapsed().as_millis();
+        let t2 = std::time::Instant::now();
+        select_bank(device, free).expect("reselect hybrid bank (2nd switch)");
+        let switch_again_ms = t2.elapsed().as_millis();
+        select_bank(device, before.active).expect("reselect original bank (final)");
+        println!("switch timings: to_hybrid={switch_to_hybrid_ms} ms, back={switch_back_ms} ms, again={switch_again_ms} ms");
+
+        delete_bank(device, free).expect("delete temporary probe bank");
+        for (btn, layer, rec) in &guard.3 {
+            write_bank(device, LIVE_BANK, *btn, *layer, *rec).expect("restore live probe record");
+        }
+        let after = read_banks(device).expect("banks after cleanup");
+        assert_eq!(after.assigned, before.assigned, "bank inventory restored");
+        assert_eq!(after.active, before.active, "active bank restored");
+        drop(guard);
+        println!("v3_hybrid_bank_probe PASSED cleanly.");
+    }
+
+    /// Deferred V2 hardware check: verifies whether the Naga V2 HyperSpeed
+    /// accepts and echoes an inert `Consumer(0)` record on live map thumb 12,
+    /// restoring the original record in `Drop`. Skips cleanly if V2 is asleep.
+    #[test]
+    #[ignore]
+    fn v2_consumer_zero_probe() {
+        const THUMB_12: u8 = 0x4b;
+        let Ok(device) = VendorDevice::open_model(&NAGA_V2_HYPERSPEED) else {
+            println!("v2_consumer_zero_probe: V2 not connected (skipped)");
+            return;
+        };
+        let saved = match device.read_block(LIVE_BANK, THUMB_12, 0) {
+            Ok(rec) => rec,
+            Err(error) if crate::mouse_memory::is_no_response(&error) => {
+                println!("v2_consumer_zero_probe: V2 asleep (skipped): {error}");
+                return;
+            }
+            Err(error) => panic!("read V2 live thumb 12: {error}"),
+        };
+        struct RestoreV2(VendorDevice, [u8; 7]);
+        impl Drop for RestoreV2 {
+            fn drop(&mut self) {
+                let _ = self.0.set_block(LIVE_BANK, THUMB_12, 0, &self.1);
+                println!("v2_consumer_zero_probe restored live thumb 12: {:02x?}", self.0.read_block(LIVE_BANK, THUMB_12, 0));
+            }
+        }
+        let guard = RestoreV2(device, saved);
+        let target = block(OnboardAction::Consumer(0));
+        write_bank(&guard.0, LIVE_BANK, THUMB_12, 0, target).expect("V2 rejected Consumer(0) record");
+        let readback = guard.0.read_block(LIVE_BANK, THUMB_12, 0).expect("read back V2 Consumer(0)");
+        println!("v2_consumer_zero_probe: wrote {target:02x?}, read back {readback:02x?}");
+        assert_eq!(readback, target, "V2 Consumer(0) readback mismatch");
+        write_bank(&guard.0, LIVE_BANK, THUMB_12, 0, saved).expect("restore V2 live thumb 12");
+        assert_eq!(guard.0.read_block(LIVE_BANK, THUMB_12, 0).expect("verify restored V2 thumb 12"), saved);
+        drop(guard);
+        println!("v2_consumer_zero_probe PASSED cleanly.");
+    }
+
     /// A V3 with banks 1 and 2 (bank 1 playing at 1100 DPI) and the seed
     /// config's live targets.
     fn sidearm_bank_mouse() -> (crate::mouse_memory::fake::FakeMouse, Vec<(u8, u8, OnboardAction)>) {
@@ -2367,8 +3238,9 @@ pub(crate) mod tests {
         select_bank(&device, 3).unwrap();
         let (banks, sidearm) = user_banks(&device).unwrap();
         assert_eq!((banks.assigned.clone(), banks.active, sidearm), (vec![1, 2], 3, Some(3)));
-        let offline = crate::mouse_offline::offline_profile_id(&config_with_v3(), None);
-        assert_eq!(exit_bank(&bank_plan(&config_with_v3(), &NAGA_V3_PRO, &banks, &offline), &banks, &offline), 1);
+        let v3_cfg = config_with_v3();
+        let offline = crate::mouse_offline::offline_profile_id(&v3_cfg, None);
+        assert_eq!(exit_bank(&v3_cfg, &bank_plan(&v3_cfg, &NAGA_V3_PRO, &banks, &offline), &banks, &offline), Some(1));
     }
 
     #[test]
@@ -2784,5 +3656,363 @@ pub(crate) mod tests {
         let saved = r"\\?\HID#VID_1532&PID_00E8&MI_03#7&1a2b3c&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}";
         assert!(same_receiver(saved, &device(r"\\?\hid#vid_1532&pid_00e8&mi_03#8&ffff&0&0000#{guid}")));
         assert!(!same_receiver(saved, &VendorDevice::test_handle(&NAGA_V2_HYPERSPEED, 0x00b4, "")));
+    }
+
+    fn hybrid_test_config() -> (AppConfig, String, String) {
+        use crate::config::{
+            Action, ActionCondition, ActionPayload, Binding, MouseOverrides, PasteMode, Profile,
+            ShortcutActionPayload, TextSnippetPayload, TriggerMode,
+        };
+        let mut config = config_with_v3();
+        let default_id = config.settings.fallback_profile_id.clone();
+        let game_id = "profile-game".to_owned();
+        config.profiles.push(Profile {
+            id: game_id.clone(),
+            name: "Game".into(),
+            description: None,
+            enabled: true,
+            priority: 10,
+            mouse_dpi: None,
+            mouse_poll_rate_hz: None,
+            mouse_dpi_stages: None,
+            device_slots: Some([(NAGA_V3_PRO.device_id.to_owned(), 2)].into()),
+            device_mouse: Some([(
+                NAGA_V3_PRO.device_id.to_owned(),
+                MouseOverrides { hardware_bank: Some(true), ..Default::default() },
+            )].into()),
+            hypershift2_triggers: Vec::new(),
+        });
+        config.profiles.iter_mut().find(|p| p.id == default_id).unwrap().device_slots =
+            Some([(NAGA_V3_PRO.device_id.to_owned(), 1)].into());
+
+        let act_copy = "act-copy".to_owned();
+        let act_paste = "act-paste".to_owned();
+        let act_text = "act-text".to_owned();
+        let act_cond = "act-cond".to_owned();
+        config.actions.extend([
+            Action {
+                id: act_copy.clone(),
+                action_type: ActionType::Shortcut,
+                display_name: "Copy".into(),
+                payload: ActionPayload::Shortcut(ShortcutActionPayload { key: "C".into(), ctrl: true, shift: false, alt: false, win: false, raw: None }),
+                conditions: Vec::new(),
+                notes: None,
+            },
+            Action {
+                id: act_paste.clone(),
+                action_type: ActionType::Shortcut,
+                display_name: "Paste".into(),
+                payload: ActionPayload::Shortcut(ShortcutActionPayload { key: "V".into(), ctrl: true, shift: false, alt: false, win: false, raw: None }),
+                conditions: Vec::new(),
+                notes: None,
+            },
+            Action {
+                id: act_text.clone(),
+                action_type: ActionType::TextSnippet,
+                display_name: "Hi".into(),
+                payload: ActionPayload::TextSnippet(TextSnippetPayload::Inline { text: "hi".into(), paste_mode: PasteMode::SendText, tags: Vec::new(), press_enter: false }),
+                conditions: Vec::new(),
+                notes: None,
+            },
+            Action {
+                id: act_cond.clone(),
+                action_type: ActionType::Shortcut,
+                display_name: "Cond Copy".into(),
+                payload: ActionPayload::Shortcut(ShortcutActionPayload { key: "X".into(), ctrl: true, shift: false, alt: false, win: false, raw: None }),
+                conditions: vec![ActionCondition::WindowTitleContains { value: "Game".into() }],
+                notes: None,
+            },
+        ]);
+
+        let mut add = |id: &str, ctrl: &str, layer: Layer, action: &str, trigger_mode: Option<TriggerMode>| {
+            config.bindings.push(Binding {
+                id: id.into(),
+                profile_id: game_id.clone(),
+                control_id: control_id(&NAGA_V3_PRO, ctrl),
+                layer,
+                action_id: action.into(),
+                label: id.into(),
+                enabled: true,
+                trigger_mode,
+                color_tag: None,
+                chord_partner: None,
+                throttle_ms: None,
+            });
+        };
+        // thumb_01: native Ctrl+C on L0, native Ctrl+V on L1
+        add("b-t1-l0", "thumb_01", Layer::Standard, &act_copy, None);
+        add("b-t1-l1", "thumb_01", Layer::Hypershift, &act_paste, None);
+        // thumb_02: text snippet on L0 -> consumer signal on L0 and inherited L1
+        add("b-t2-l0", "thumb_02", Layer::Standard, &act_text, None);
+        // thumb_03: plain shortcut + extra LongPress on L0 -> consumer signal
+        add("b-t3-l0", "thumb_03", Layer::Standard, &act_copy, None);
+        add("b-t3-lp", "thumb_03", Layer::Standard, &act_text, Some(TriggerMode::LongPress));
+        // thumb_04: shortcut with window condition -> consumer signal
+        add("b-t4-l0", "thumb_04", Layer::Standard, &act_cond, None);
+        // thumb_05: plain shortcut on L0, but also has HS2 binding -> consumer signal
+        add("b-t5-l0", "thumb_05", Layer::Standard, &act_copy, None);
+        add("b-t5-hs2", "thumb_05", Layer::Hypershift2, &act_paste, None);
+
+        (config, default_id, game_id)
+    }
+
+    #[test]
+    fn hybrid_bank_targets_splits_native_keys_and_sidearm_only_signals() {
+        use crate::mouse_memory::fake;
+        let (config, _default_id, game_id) = hybrid_test_config();
+        assert!(profile_uses_hardware_bank(&config, &NAGA_V3_PRO, &game_id));
+        let targets = hybrid_bank_targets(&config, &NAGA_V3_PRO, &game_id);
+        let find = |ctrl: &str, layer: u8| {
+            let btn = NAGA_V3_PRO.button_id_for(ctrl).unwrap();
+            targets.iter().find(|&&(b, l, _)| (b, l) == (btn, layer)).map(|&(_, _, a)| a)
+        };
+        // Native Ctrl+C / Ctrl+V on thumb_01
+        assert_eq!(find("thumb_01", 0), Some(OnboardAction::Key { modifier: 0x01, usage: 0x06 }));
+        assert_eq!(find("thumb_01", 1), Some(OnboardAction::Key { modifier: 0x01, usage: 0x19 }));
+        // Sidearm-only buttons get reserved consumer usages (index 1, 2, 3, 4 -> USAGES[2*i + layer])
+        assert_eq!(find("thumb_02", 0), Some(OnboardAction::Consumer(USAGES[2])));
+        assert_eq!(find("thumb_02", 1), Some(OnboardAction::Consumer(USAGES[3])));
+        assert_eq!(find("thumb_03", 0), Some(OnboardAction::Consumer(USAGES[4])));
+        assert_eq!(find("thumb_04", 0), Some(OnboardAction::Consumer(USAGES[6])));
+        assert_eq!(find("thumb_05", 0), Some(OnboardAction::Consumer(USAGES[8])));
+        // Unbound thumb_06 gets inert Consumer(0), never an own Sidearm signal
+        assert_eq!(find("thumb_06", 0), Some(OnboardAction::Consumer(crate::mouse_offline::BANK_SILENT_USAGE)));
+        // Firmware trigger (0x39) preserved as Hypershift on both layers; profile button (0x0e) never touched
+        let trigger = NAGA_V3_PRO.live.as_ref().unwrap().firmware_trigger.unwrap();
+        let profile_btn = NAGA_V3_PRO.live.as_ref().unwrap().profile_button.unwrap();
+        assert!(targets.contains(&(trigger, 0, OnboardAction::Hypershift)));
+        assert!(targets.contains(&(trigger, 1, OnboardAction::Hypershift)));
+        assert!(!targets.iter().any(|&(b, _, _)| b == profile_btn));
+
+        // Toggling hardware_bank changes store_key and persists hybrid records into bank 2
+        let (mouse, _) = sidearm_bank_mouse();
+        let _fake = fake::install(mouse);
+        let dir = tempfile::tempdir().unwrap();
+        let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
+        let banks = Banks { assigned: vec![1, 2], active: 1 };
+        let offline = crate::mouse_offline::offline_profile_id(&config, None);
+        let hybrid_key = store_key(&config, &NAGA_V3_PRO, &banks, &offline);
+        let mut plain_cfg = config.clone();
+        plain_cfg.profiles.iter_mut().find(|p| p.id == game_id).unwrap().device_mouse = None;
+        assert_ne!(hybrid_key, store_key(&plain_cfg, &NAGA_V3_PRO, &banks, &offline));
+        STORED[NAGA_V3_PRO.catalog_index()].store(0, Ordering::Release);
+        store_banks(&device, &config, &NAGA_V3_PRO, &offline, dir.path(), false).unwrap();
+        let t1 = NAGA_V3_PRO.button_id_for("thumb_01").unwrap();
+        let t2 = NAGA_V3_PRO.button_id_for("thumb_02").unwrap();
+        fake::with(|mouse| {
+            assert_eq!(mouse.records[&(2, t1, 0)], bank_block(2, OnboardAction::Key { modifier: 0x01, usage: 0x06 }));
+            assert_eq!(mouse.records[&(2, t2, 0)], bank_block(2, OnboardAction::Consumer(USAGES[2])));
+        });
+    }
+
+    #[test]
+    fn dedicated_offline_profile_is_never_hybrid_and_exit_bank_skips_hybrid_under_active() {
+        let (mut config, default_id, game_id) = hybrid_test_config();
+        // Trying to enable hardware_bank on the dedicated offline profile is ignored.
+        config.profiles.iter_mut().find(|p| p.id == default_id).unwrap().device_mouse = Some([(
+            NAGA_V3_PRO.device_id.to_owned(),
+            crate::config::MouseOverrides { hardware_bank: Some(true), ..Default::default() },
+        )].into());
+        assert!(!profile_uses_hardware_bank(&config, &NAGA_V3_PRO, &default_id));
+        assert!(profile_uses_hardware_bank(&config, &NAGA_V3_PRO, &game_id));
+
+        // Under @active when the active profile at exit is the hybrid profile on bank 2,
+        // exit_bank must select clean bank 1, never hybrid bank 2.
+        config.settings.offline_profile_id = Some(crate::config::OFFLINE_PROFILE_ACTIVE.into());
+        let banks = Banks { assigned: vec![1, 2], active: 2 };
+        let plan = bank_plan(&config, &NAGA_V3_PRO, &banks, &game_id);
+        assert_eq!(exit_bank(&config, &plan, &banks, &game_id), Some(1));
+
+        // Single-clean-bank invariant: a mouse with only ONE user bank refuses hybrid mode
+        // so offline restoration always has a clean bank.
+        let one_bank = Banks { assigned: vec![2], active: 2 };
+        let one_plan = bank_plan(&config, &NAGA_V3_PRO, &one_bank, &game_id);
+        assert_eq!(one_plan, [PlannedBank { bank: 2, profile_id: game_id.as_str(), hybrid: false }]);
+        assert_eq!(exit_bank(&config, &one_plan, &one_bank, &game_id), Some(2));
+
+        // Implicit sole-bank fallback (hybrid profile linked to missing slot 5, mouse only has bank 1)
+        // must ALWAYS be pure offline (`hybrid: false`).
+        let mut missing_slot_cfg = config.clone();
+        missing_slot_cfg.profiles.iter_mut().find(|p| p.id == default_id).unwrap().device_slots = None;
+        missing_slot_cfg.profiles.iter_mut().find(|p| p.id == game_id).unwrap().device_slots =
+            Some([(NAGA_V3_PRO.device_id.to_owned(), 5)].into());
+        let sole = Banks { assigned: vec![1], active: 1 };
+        assert_eq!(
+            bank_plan(&missing_slot_cfg, &NAGA_V3_PRO, &sole, &game_id),
+            [PlannedBank { bank: 1, profile_id: game_id.as_str(), hybrid: false }]
+        );
+
+        // Duplicate physical slot: dedicated offline profile defensively owns slot 1
+        // and blocks the hybrid profile from claiming it.
+        let mut dup_cfg = config.clone();
+        dup_cfg.profiles.iter_mut().find(|p| p.id == game_id).unwrap().device_slots =
+            Some([(NAGA_V3_PRO.device_id.to_owned(), 1)].into());
+        assert!(crate::config::validate_config(&dup_cfg).is_err());
+        assert!(!profile_uses_hardware_bank(&dup_cfg, &NAGA_V3_PRO, &game_id));
+        let dup_plan = bank_plan(&dup_cfg, &NAGA_V3_PRO, &banks, &default_id);
+        assert_eq!(dup_plan, [PlannedBank { bank: 1, profile_id: default_id.as_str(), hybrid: false }]);
+    }
+
+    #[test]
+    fn hybrid_classifier_rejects_throttle_inherited_gestures_hs2_trigger_and_key_mode() {
+        let (mut config, _default_id, game_id) = hybrid_test_config();
+        // Throttled plain shortcut on thumb_01 must stay on consumer signal.
+        config.bindings.iter_mut().find(|b| b.id == "b-t1-l0").unwrap().throttle_ms = Some(250);
+        // Standard LongPress on thumb_03 must also keep HyperShift plain press on consumer signal.
+        config.bindings.push(crate::config::Binding {
+            id: "b-t3-hs-plain".into(),
+            profile_id: game_id.clone(),
+            control_id: control_id(&NAGA_V3_PRO, "thumb_03"),
+            layer: Layer::Hypershift,
+            action_id: "act-paste".into(),
+            label: "Paste".into(),
+            enabled: true,
+            trigger_mode: None,
+            color_tag: None,
+            chord_partner: None,
+            throttle_ms: None,
+        });
+        let targets = hybrid_bank_targets(&config, &NAGA_V3_PRO, &game_id);
+        let find = |ctrl: &str, layer: u8| {
+            let btn = NAGA_V3_PRO.button_id_for(ctrl).unwrap();
+            targets.iter().find(|&&(b, l, _)| (b, l) == (btn, layer)).map(|&(_, _, a)| a)
+        };
+        assert_eq!(find("thumb_01", 0), Some(OnboardAction::Consumer(USAGES[0])), "throttled binding stays on consumer signal");
+        assert_eq!(find("thumb_03", 1), Some(OnboardAction::Consumer(USAGES[5])), "HyperShift inherits Standard LongPress -> consumer signal");
+
+        // Adding an HS2 trigger on V3 suppresses native keys across the profile so holding HS2 silences unbound buttons.
+        let mut hs2_cfg = config.clone();
+        hs2_cfg.profiles.iter_mut().find(|p| p.id == game_id).unwrap().hypershift2_triggers = vec!["v3_mouse_right".into()];
+        let hs2_targets = hybrid_bank_targets(&hs2_cfg, &NAGA_V3_PRO, &game_id);
+        let t1 = NAGA_V3_PRO.button_id_for("thumb_01").unwrap();
+        assert_eq!(
+            hs2_targets.iter().find(|&&(b, l, _)| (b, l) == (t1, 1)).map(|&(_, _, a)| a),
+            Some(OnboardAction::Consumer(USAGES[1])),
+            "HS2 trigger keeps controls on consumer signals"
+        );
+
+        // Key-fallback mode (consumer signals disabled) refuses hybrid mode cleanly.
+        crate::mouse_memory::set_consumer_signals(false);
+        let allowed_in_key_mode = profile_uses_hardware_bank(&config, &NAGA_V3_PRO, &game_id);
+        crate::mouse_memory::set_consumer_signals(true);
+        assert!(!allowed_in_key_mode, "hybrid mode requires consumer signals");
+    }
+
+    #[test]
+    fn apply_profile_bank_switches_to_hybrid_and_back_and_respects_offline_and_released() {
+        use crate::mouse_memory::fake;
+        let (mut config, default_id, game_id) = hybrid_test_config();
+        // Give the hybrid profile a distinct live DPI to verify bank-then-DPI ordering.
+        config.profiles.iter_mut().find(|p| p.id == game_id).unwrap()
+            .device_mouse.as_mut().unwrap().get_mut(NAGA_V3_PRO.device_id).unwrap().mouse_dpi = Some(2400);
+        let (mouse, targets) = sidearm_bank_mouse();
+        let _fake = fake::install(mouse);
+        let dir = tempfile::tempdir().unwrap();
+        let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
+        let (sidearm, base) = claim_sidearm_bank(&device, &config, &targets, dir.path()).unwrap().unwrap();
+        assert_eq!(sidearm, 3);
+        mark_in_sidearm_bank(dir.path(), &NAGA_V3_PRO, sidearm, base);
+        select_bank(&device, sidearm).unwrap();
+
+        let index = NAGA_V3_PRO.catalog_index();
+        SIDEARM_BANK[index].store(sidearm, Ordering::Release);
+        ACTIVE_LIVE_BANK[index].store(sidearm, Ordering::Release);
+        VERIFIED_HYBRID_BANKS[index].store(0, Ordering::Release);
+        OFFLINE[index].store(0, Ordering::Release);
+        RELEASED[index].store(false, Ordering::Release);
+        INPUT_TEST_MODE.store(false, Ordering::Release);
+
+        let game = config.profiles.iter().find(|p| p.id == game_id).unwrap().clone();
+        let default = config.profiles.iter().find(|p| p.id == default_id).unwrap().clone();
+
+        // Unverified hybrid bank MUST stay on Sidearm bank until verified stored!
+        *DESIRED_PROFILE.lock().unwrap() = Some(DesiredProfile { revision: next_profile_revision(), profile: Some(game.clone()), config: config.clone() });
+        assert!(!reconcile_on_device(&device, Some(dir.path()), None).unwrap());
+        fake::with(|m| assert_eq!(m.active_bank, 3, "unverified hybrid slot must not be selected"));
+
+        // Store banks -> verifies bank 2 and immediately reconciles desired hybrid profile + live DPI!
+        let offline = crate::mouse_offline::offline_profile_id(&config, None);
+        STORED[index].store(0, Ordering::Release);
+        store_banks(&device, &config, &NAGA_V3_PRO, &offline, dir.path(), false).unwrap();
+        assert_ne!(VERIFIED_HYBRID_BANKS[index].load(Ordering::Acquire) & (1 << 2), 0);
+        fake::with(|m| {
+            assert_eq!(m.active_bank, 2, "verified hybrid bank selected automatically after store");
+            assert_eq!(m.dpi.get(&0), Some(&2400), "live DPI applied after bank switch");
+        });
+        assert_eq!(ACTIVE_LIVE_BANK[index].load(Ordering::Acquire), 2);
+        // Repeating the same profile is a no-op.
+        assert!(!reconcile_on_device(&device, Some(dir.path()), None).unwrap());
+
+        // Input test mode forces Sidearm bank so native flash keys cannot fire while testing.
+        INPUT_TEST_MODE.store(true, Ordering::Release);
+        assert!(reconcile_on_device(&device, Some(dir.path()), None).unwrap());
+        fake::with(|m| assert_eq!(m.active_bank, 3));
+        INPUT_TEST_MODE.store(false, Ordering::Release);
+        assert!(reconcile_on_device(&device, Some(dir.path()), None).unwrap());
+        fake::with(|m| assert_eq!(m.active_bank, 2));
+
+        // Physical profile-button press detected before monitor tick: do NOT overwrite user's bank!
+        fake::with(|m| m.active_bank = 1);
+        *DESIRED_PROFILE.lock().unwrap() = Some(DesiredProfile { revision: next_profile_revision(), profile: Some(default.clone()), config: config.clone() });
+        assert!(!reconcile_on_device(&device, Some(dir.path()), None).unwrap());
+        fake::with(|m| assert_eq!(m.active_bank, 1, "manual profile button choice preserved"));
+        assert!(is_offline(&NAGA_V3_PRO));
+        // Clear manual offline and restore bank 2 for next checks.
+        set_offline(&NAGA_V3_PRO, 0);
+        select_bank(&device, 2).unwrap();
+        ACTIVE_LIVE_BANK[index].store(2, Ordering::Release);
+
+        // Switching back to normal profile returns to Sidearm bank 3.
+        assert!(reconcile_on_device(&device, Some(dir.path()), None).unwrap());
+        fake::with(|m| assert_eq!(m.active_bank, 3));
+        assert_eq!(ACTIVE_LIVE_BANK[index].load(Ordering::Acquire), 3);
+
+        // Manual offline mode pauses switching.
+        *DESIRED_PROFILE.lock().unwrap() = Some(DesiredProfile { revision: next_profile_revision(), profile: Some(game.clone()), config: config.clone() });
+        OFFLINE[index].store(sidearm, Ordering::Release);
+        assert!(!reconcile_on_device(&device, Some(dir.path()), None).unwrap());
+        fake::with(|m| assert_eq!(m.active_bank, 3));
+        OFFLINE[index].store(0, Ordering::Release);
+
+        // "Return slot" (RELEASED) pauses switching.
+        RELEASED[index].store(true, Ordering::Release);
+        assert!(!reconcile_on_device(&device, Some(dir.path()), None).unwrap());
+        fake::with(|m| assert_eq!(m.active_bank, 3));
+        RELEASED[index].store(false, Ordering::Release);
+
+        // Cleanup global test state
+        *DESIRED_PROFILE.lock().unwrap() = None;
+        SIDEARM_BANK[index].store(0, Ordering::Release);
+        ACTIVE_LIVE_BANK[index].store(0, Ordering::Release);
+        VERIFIED_HYBRID_BANKS[index].store(0, Ordering::Release);
+    }
+
+    #[test]
+    fn leave_sidearm_bank_and_restore_orphaned_return_to_clean_bank_from_hybrid() {
+        use crate::mouse_memory::fake;
+        let (config, _default_id, _game_id) = hybrid_test_config();
+        let (mouse, targets) = sidearm_bank_mouse();
+        let _fake = fake::install(mouse);
+        fake::set_present_models(vec![&NAGA_V3_PRO]);
+        let dir = tempfile::tempdir().unwrap();
+        crate::config::save_config(dir.path(), config.clone(), None).unwrap();
+        let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
+        let (sidearm, base) = claim_sidearm_bank(&device, &config, &targets, dir.path()).unwrap().unwrap();
+        mark_in_sidearm_bank(dir.path(), &NAGA_V3_PRO, sidearm, base);
+        record_managed_hybrid_bank(dir.path(), &NAGA_V3_PRO, sidearm, 2);
+        // Simulate active hybrid bank 2 when Sidearm exits cleanly.
+        select_bank(&device, 2).unwrap();
+        leave_sidearm_bank(&device, Some(&config), dir.path()).unwrap();
+        fake::with(|m| assert_eq!(m.active_bank, 1, "clean exit from hybrid bank restores clean bank 1"));
+
+        // Simulate crash/kill while on hybrid bank 2 with config.json unreadable -> marker still restores clean bank 1!
+        std::fs::remove_file(dir.path().join("config.json")).unwrap();
+        mark_in_sidearm_bank(dir.path(), &NAGA_V3_PRO, sidearm, base);
+        record_managed_hybrid_bank(dir.path(), &NAGA_V3_PRO, sidearm, 2);
+        select_bank(&device, 2).unwrap();
+        drop(device);
+        assert!(restore_orphaned(dir.path()));
+        fake::with(|m| assert_eq!(m.active_bank, 1, "crash recovery from hybrid bank restores clean bank 1 without config.json"));
+        assert!(!in_sidearm_bank_marker(dir.path(), &NAGA_V3_PRO).exists());
     }
 }

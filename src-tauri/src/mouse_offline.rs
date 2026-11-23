@@ -91,6 +91,8 @@ pub enum TargetState { Written, NotWritten, FollowsWindow, Unknown, Pending }
 pub struct OfflineBank {
     pub bank: u8,
     pub profile_id: String,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub hybrid: bool,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -108,6 +110,10 @@ pub struct OfflineTarget {
     /// `live_overlay::exit_bank` the exit uses.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub playing_bank: Option<u8>,
+    /// V3: whether the effective writer stores this profile as a hybrid hardware
+    /// bank (live keys + Sidearm consumer signals) rather than pure offline.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub hybrid: bool,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -119,21 +125,22 @@ pub struct OfflinePreview {
 pub fn preview(config: &AppConfig, model: &NativeModel, profile_id: &str, banks: Option<&crate::mouse_memory::live_overlay::Banks>) -> OfflinePreview {
     let follows = config.settings.offline_profile_id.as_deref() == Some(crate::config::OFFLINE_PROFILE_ACTIVE);
     let offline = if follows { crate::config::OFFLINE_PROFILE_ACTIVE.to_owned() } else { offline_profile_id(config, None) };
-    let mut target = OfflineTarget { state: TargetState::NotWritten, bank: None, written_profile_id: None, banks: None, playing_bank: None };
+    let mut target = OfflineTarget { state: TargetState::NotWritten, bank: None, written_profile_id: None, banks: None, playing_bank: None, hybrid: false };
     if model.verified && model.transport == Transport::LiveOverlay {
         if let Some(banks) = banks {
             let planned = crate::mouse_memory::live_overlay::bank_plan(config, model, banks, &offline);
-            if let Some(&(bank, _)) = planned.iter().find(|(_, profile)| *profile == profile_id) {
+            if let Some(entry) = planned.iter().find(|entry| entry.profile_id == profile_id) {
                 target.state = TargetState::Written;
-                target.bank = Some(bank);
-            } else if follows && planned.iter().any(|(_, profile)| *profile == crate::config::OFFLINE_PROFILE_ACTIVE) {
+                target.bank = Some(entry.bank);
+                target.hybrid = entry.hybrid;
+            } else if follows && planned.iter().any(|entry| entry.profile_id == crate::config::OFFLINE_PROFILE_ACTIVE) {
                 target.state = TargetState::FollowsWindow;
             }
             if matches!(target.state, TargetState::Written | TargetState::NotWritten) {
                 if !follows && !planned.is_empty() {
-                    target.playing_bank = Some(crate::mouse_memory::live_overlay::exit_bank(&planned, banks, &offline));
+                    target.playing_bank = crate::mouse_memory::live_overlay::exit_bank(config, &planned, banks, &offline);
                 }
-                target.banks = Some(planned.into_iter().map(|(bank, profile_id)| OfflineBank { bank, profile_id: profile_id.into() }).collect());
+                target.banks = Some(planned.into_iter().map(|entry| OfflineBank { bank: entry.bank, profile_id: entry.profile_id.into(), hybrid: entry.hybrid }).collect());
             }
         } else {
             target.state = TargetState::Unknown;
@@ -323,6 +330,80 @@ fn binding_action<'a>(
     let onboard = onboard_action(model, &action.payload);
     Some(BindingAction { action_id: action.id.as_str(), action: onboard,
         live_action_type: (onboard == Err(OfflineReason::ActionType)).then_some(action.action_type.as_str()) })
+}
+
+/// Native firmware action for `(profile_id, control, layer)` in a live hybrid bank,
+/// or `None` when Sidearm must receive the press over a silent consumer signal.
+/// Rejects unplayable action types, non-press gestures, chords, throttled bindings,
+/// any extra enabled gesture on the effective layer (including Standard gestures
+/// inherited under HyperShift), non-empty `action.conditions`, any enabled
+/// `Hypershift2` / `HypershiftBoth` binding on `(profile_id, control)`, and any
+/// profile that configures a HyperShift 2 trigger on `model` (holding HS2 must
+/// suppress unbound buttons rather than firing native flash keys).
+pub(crate) fn hybrid_native_action(
+    config: &AppConfig,
+    model: &NativeModel,
+    profile_id: &str,
+    control: &str,
+    layer: Layer,
+) -> Option<OnboardAction> {
+    use crate::config::Gesture;
+    if !matches!(layer, Layer::Standard | Layer::Hypershift) {
+        return None;
+    }
+    // If this profile configures a HyperShift 2 trigger on `model`, holding HS2
+    // must silence unbound buttons instead of letting native flash keys fire.
+    if let Some(profile) = config.profiles.iter().find(|p| p.id == profile_id)
+        && profile.hypershift2_triggers.iter().any(|trigger| {
+            config.physical_controls.iter().any(|c| c.device_id == model.device_id && c.id.as_str() == trigger.as_str())
+                || (!model.control_prefix.is_empty() && trigger.starts_with(model.control_prefix))
+        })
+    {
+        return None;
+    }
+    // Any enabled HS2 / HS+HS2 binding on this control needs Sidearm to see presses.
+    if config.bindings.iter().any(|b| {
+        b.enabled
+            && b.profile_id == profile_id
+            && b.control_id.as_str() == control
+            && matches!(b.layer, Layer::Hypershift2 | Layer::HypershiftBoth)
+    }) {
+        return None;
+    }
+    let layer_bindings = |wanted: Layer| -> Vec<&crate::config::Binding> {
+        config
+            .bindings
+            .iter()
+            .filter(|b| b.enabled && b.profile_id == profile_id && b.layer == wanted && b.control_id.as_str() == control)
+            .collect()
+    };
+    let own = layer_bindings(layer);
+    let standard = if layer == Layer::Hypershift {
+        layer_bindings(Layer::Standard)
+    } else {
+        Vec::new()
+    };
+    // Per-gesture fallback: under HyperShift, extra gestures (Long/Double/Triple)
+    // or chords on Standard remain reachable unless overridden, so ANY extra
+    // gesture or chord on either layer requires Sidearm's timing engine.
+    let has_timing_or_chord = |bindings: &[&crate::config::Binding]| {
+        bindings.iter().any(|b| Gesture::of(b.trigger_mode) != Gesture::Press || b.trigger_mode == Some(TriggerMode::Chord))
+    };
+    if has_timing_or_chord(&own) || has_timing_or_chord(&standard) {
+        return None;
+    }
+    let binding = own
+        .into_iter()
+        .find(|b| Gesture::of(b.trigger_mode) == Gesture::Press)
+        .or_else(|| standard.into_iter().find(|b| Gesture::of(b.trigger_mode) == Gesture::Press))?;
+    if binding.throttle_ms.unwrap_or(0) > 0 {
+        return None;
+    }
+    let action = config.actions.iter().find(|a| a.id == binding.action_id)?;
+    if !action.conditions.is_empty() {
+        return None;
+    }
+    onboard_action(model, &action.payload).ok()
 }
 
 /// The firmware form of an action on `model`, when it has one.
@@ -1261,7 +1342,7 @@ mod tests {
         let (mut config, profile) = empty_profile();
         bind(&mut config, &profile, "thumb_01", Layer::Standard, shortcut("T", true, false, false), None);
         let own = config.profiles.iter_mut().find(|p| p.id == profile).unwrap();
-        own.device_mouse = Some([("razer-naga".to_owned(), MouseOverrides { mouse_dpi: Some(1600), mouse_poll_rate_hz: None, mouse_dpi_stages: None })].into());
+        own.device_mouse = Some([("razer-naga".to_owned(), MouseOverrides { mouse_dpi: Some(1600), ..Default::default() })].into());
 
         let (device, _fake) = fake_v2();
         store(&device, &config, &profile).unwrap();

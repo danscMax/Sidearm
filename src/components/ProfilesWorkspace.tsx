@@ -65,6 +65,7 @@ import { ContextMenu } from "./ContextMenu";
 import { AddControlModal, type EditControlTarget } from "./AddControlModal";
 import { DeviceCards } from "./DeviceCards";
 import { MouseWorkspace } from "./MouseWorkspace";
+import { OfflineFixPanel } from "./OfflineFixPanel";
 import { PressStats } from "./PressStats";
 import { PillTrack } from "./PillTrack";
 import { GenericDeviceView } from "./GenericDeviceView";
@@ -1021,6 +1022,39 @@ export function ProfilesWorkspace({
             </button>
           </div>
         </Notice>
+      ) : null}
+
+      {offlineView && activeDevice?.builtin && effectiveProfileId ? (
+        <OfflineFixPanel
+          config={activeConfig}
+          profileId={effectiveProfileId}
+          deviceId={activeDevice.id}
+          preview={offlinePreview}
+          hybridBankActive={
+            offlinePreview?.target.hybrid === true
+            || (
+              offlinePreview?.target.state === "unknown"
+              && Boolean(
+                activeProfile?.deviceMouse?.[activeDevice.id]?.hardwareBank
+                  && activeProfile.deviceSlots?.[activeDevice.id] !== undefined
+                  && effectiveProfileId !== (
+                    activeConfig.settings.offlineProfileId
+                    && activeConfig.settings.offlineProfileId !== "@active"
+                    && activeConfig.profiles.some((p) => p.id === activeConfig.settings.offlineProfileId)
+                      ? activeConfig.settings.offlineProfileId
+                      : activeConfig.settings.fallbackProfileId
+                  ),
+              )
+            )
+          }
+          onApplyConfig={updateDraft}
+          onEditControl={(controlId, layer) => {
+            if (selectedLayer !== layer) onSelectLayer(layer);
+            const existing = findBinding(activeConfig, effectiveProfileId, layer, controlId) ?? null;
+            handleOpenActionPicker(controlId, existing, layer);
+          }}
+          onToast={showToast}
+        />
       ) : null}
 
       {searchAllProfiles && searchQuery ? (

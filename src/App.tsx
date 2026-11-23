@@ -69,7 +69,7 @@ import { displayNameForControl, labelForLayer, relativeTime } from "./lib/labels
 import { MOUSE_STATUS_NOTICES, type MouseStatusKind, type NativeModelInfo } from "./lib/onboard-mapping";
 import { nativeTexts } from "./lib/ui-text";
 import { exportProfileToFile } from "./lib/profile-transfer";
-import { isBuiltinControl, playsWithoutSidearm } from "./lib/onboard-mapping";
+import { classifyHardwarePlayability, isBuiltinControl } from "./lib/onboard-mapping";
 import { syncedWith } from "./lib/device-transfer";
 import { withOfflineAssignment } from "./lib/mouse-visual";
 import { isOfflineLayer } from "./lib/config";
@@ -1204,6 +1204,12 @@ function App() {
   // The profile written into the mice at exit, on a layer the mouse keeps.
   const offlineHere = offlinePreview?.target.state !== "notWritten"
     && (selectedLayer === "standard" || selectedLayer === "hypershift");
+  // Confirmed stored (or pending store) in mouse memory — never guess on unknown/notWritten.
+  const storedInMemoryHere = (offlinePreview?.target.state === "written"
+    || offlinePreview?.target.state === "pending"
+    || offlinePreview?.target.state === "followsWindow")
+    && (selectedLayer === "standard" || selectedLayer === "hypershift");
+  const effectiveDeviceSupportsHs2 = Boolean(deviceLayout(effectiveDeviceId)?.hypershift2Triggers?.length);
   // Per button: the other buttons of this mouse and layer doing the same thing.
   const sameAsByControlId = useMemo(
     () => activeConfig && effectiveProfileId
@@ -1223,30 +1229,36 @@ function App() {
             )
             .map((control) => {
               const binding = bindingByControlId.get(control.id) ?? null;
+              const action = binding ? actionById.get(binding.actionId) ?? null : null;
+              const builtin = isBuiltinControl(activeConfig, control.id);
+              const isHyperTrigger = builtin
+                && (control.id === hypershiftControlId(activeConfig, control.deviceId)
+                  || control.id === hypershift2ControlId(activeConfig, effectiveProfileId, control.deviceId));
+              const hwStatus = offlineHere && builtin && !isHyperTrigger && binding?.enabled && action && effectiveProfileId
+                ? classifyHardwarePlayability(activeConfig, effectiveProfileId, selectedLayer, control.id, binding, action, { checkHs2: effectiveDeviceSupportsHs2 })
+                : null;
               return withOfflineAssignment(activeConfig, effectiveProfileId ?? "", selectedLayer, {
                 control,
                 binding,
-                action: binding ? actionById.get(binding.actionId) ?? null : null,
+                action,
                 // The built-in Naga's signals are Sidearm's own transport codes —
                 // not shown (the tooltip prints a mapping as "Thumb 1 (F13)").
-                mapping: isBuiltinControl(activeConfig, control.id)
+                mapping: builtin
                   ? null
                   : encoderByControlId.get(control.id) ?? null,
                 isSelected: control.id === selectedControlId,
-                isHypershiftTrigger: isBuiltinControl(activeConfig, control.id)
-                  && (control.id === hypershiftControlId(activeConfig, control.deviceId)
-                    || control.id === hypershift2ControlId(activeConfig, effectiveProfileId, control.deviceId)),
+                isHypershiftTrigger: isHyperTrigger,
                 isHypershift2Trigger: control.id === hypershift2ControlId(activeConfig, effectiveProfileId, control.deviceId),
                 fallback: fallbackFor(control.id),
                 extras: extrasByControlId.get(control.id),
-                sidearmOnly: offlineHere && isBuiltinControl(activeConfig, control.id) && binding !== null
-                  && binding.enabled && !playsWithoutSidearm(binding, actionById.get(binding.actionId)),
+                sidearmOnly: hwStatus?.location === "sidearm",
+                inMouse: storedInMemoryHere && hwStatus?.location === "mouse",
                 syncedWith: binding ? syncedWith(activeConfig, binding.id) : undefined,
                 sameAs: sameAsByControlId.get(control.id),
               }, offlinePreview);
             }) ?? [],
       })),
-    [activeConfig, bindingByControlId, actionById, encoderByControlId, selectedControlId, effectiveDeviceId, effectiveProfileId, selectedLayer, extrasByControlId, offlineHere, offlinePreview, sameAsByControlId],
+    [activeConfig, bindingByControlId, actionById, encoderByControlId, selectedControlId, effectiveDeviceId, effectiveProfileId, selectedLayer, extrasByControlId, offlineHere, storedInMemoryHere, effectiveDeviceSupportsHs2, offlinePreview, sameAsByControlId],
   );
 
   const isProfilesMode = workspaceMode === "profiles";

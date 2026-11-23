@@ -50,10 +50,52 @@ pub fn forget_originals(device_id: &str, dpi: bool, poll_rate: bool) {
     }
 }
 
-/// Applies a profile's own DPI / poll rate to each connected mouse, from that
-/// mouse's own settings (fields left unset keep the mouse as it is). Runs on its own thread: it is called from the capture
-/// path on a profile switch and must not delay the key that caused it. The
-/// device lock serializes it with the guard tick.
+/// Applies `profile`'s live DPI / poll rate to `device` under the caller's
+/// existing `VendorDevice` lock. Used directly by `live_overlay` immediately
+/// after selecting a bank (so bank selection never clobbers the live DPI), and
+/// by [`apply_profile_mouse_settings`] for non-bank mice.
+pub(crate) fn apply_profile_to_device(device: &VendorDevice, profile: &crate::config::Profile) {
+    let model = device.model();
+    let Some((dpi, poll_rate_hz)) = switch_values(profile, model) else { return };
+    let name = &profile.name;
+    let result = (|| {
+        let mut written = false;
+        if let Some(hz) = poll_rate_hz {
+            let current = device.poll_rate_hz()?;
+            if current != hz {
+                remember(model.device_id, Originals { poll_rate_hz: Some(current), ..Default::default() });
+                device.set_poll_rate_hz(hz)?;
+                written = true;
+            }
+        }
+        // Live only: the mouse keeps its stored DPI for use without
+        // Sidearm, and a switch per alt-tab must not wear its storage.
+        if let Some(dpi) = dpi {
+            let current = device.dpi()?;
+            if current != dpi {
+                remember(model.device_id, Originals { dpi: Some(current), ..Default::default() });
+                device.set_dpi(dpi, false)?;
+                written = true;
+            }
+        }
+        Ok::<_, String>(written)
+    })();
+    match result {
+        Ok(false) => log::debug!("[mouse-speed] profile `{name}`: {} settings already in place", model.name),
+        Ok(true) => log::info!(
+            "[mouse-speed] profile `{name}`: {} DPI {dpi:?}, poll {poll_rate_hz:?} Hz written", model.name
+        ),
+        Err(message) => {
+            log::warn!("[mouse-speed] profile `{name}`: {} settings not applied: {message}", model.name)
+        }
+    }
+}
+
+/// Applies a profile's own DPI / poll rate to each connected mouse that is not
+/// bank-managed by `live_overlay` (bank-managed mice apply speed right after
+/// bank selection on the same device lock so `select_bank` cannot clobber DPI).
+/// Runs on its own thread: it is called from the capture path on a profile
+/// switch and must not delay the key that caused it.
 pub fn apply_profile_mouse_settings(profile: &crate::config::Profile) {
     // Every switch spawns its own thread and the device lock does not keep their
     // order: a switch that waited behind a newer one must not undo it — a newer
@@ -85,39 +127,12 @@ pub fn apply_profile_mouse_settings(profile: &crate::config::Profile) {
                 if crate::is_shutting_down() {
                     return;
                 }
-                let model = device.model();
-                let Some((dpi, poll_rate_hz)) = switch_values(&profile, model) else { continue };
-                let result = (|| {
-                    let mut written = false;
-                    if let Some(hz) = poll_rate_hz {
-                        let current = device.poll_rate_hz()?;
-                        if current != hz {
-                            remember(model.device_id, Originals { poll_rate_hz: Some(current), ..Default::default() });
-                            device.set_poll_rate_hz(hz)?;
-                            written = true;
-                        }
-                    }
-                    // Live only: the mouse keeps its stored DPI for use without
-                    // Sidearm, and a switch per alt-tab must not wear its storage.
-                    if let Some(dpi) = dpi {
-                        let current = device.dpi()?;
-                        if current != dpi {
-                            remember(model.device_id, Originals { dpi: Some(current), ..Default::default() });
-                            device.set_dpi(dpi, false)?;
-                            written = true;
-                        }
-                    }
-                    Ok::<_, String>(written)
-                })();
-                match result {
-                    Ok(false) => log::debug!("[mouse-speed] profile `{name}`: {} settings already in place", model.name),
-                    Ok(true) => log::info!(
-                        "[mouse-speed] profile `{name}`: {} DPI {dpi:?}, poll {poll_rate_hz:?} Hz written", model.name
-                    ),
-                    Err(message) => {
-                        log::warn!("[mouse-speed] profile `{name}`: {} settings not applied: {message}", model.name)
-                    }
+                // Bank-managed mice reconcile bank first, then live DPI under
+                // the same VendorDevice lock in live_overlay.
+                if crate::mouse_memory::live_overlay::is_bank_managed(device.model()) {
+                    continue;
                 }
+                apply_profile_to_device(&device, &profile);
             }
         })
         .ok();
@@ -213,8 +228,8 @@ mod tests {
     fn each_mouse_takes_its_own_settings_within_its_range() {
         let mut profile: Profile = crate::config::default_seed_config().profiles[0].clone();
         profile.device_mouse = Some([
-            ("razer-naga".to_owned(), MouseOverrides { mouse_dpi: Some(1600), mouse_poll_rate_hz: Some(250), mouse_dpi_stages: None }),
-            ("razer-naga-v3".to_owned(), MouseOverrides { mouse_dpi: Some(45_000), mouse_poll_rate_hz: Some(1000), mouse_dpi_stages: Some(vec![800, 45_000]) }),
+            ("razer-naga".to_owned(), MouseOverrides { mouse_dpi: Some(1600), mouse_poll_rate_hz: Some(250), mouse_dpi_stages: None, ..Default::default() }),
+            ("razer-naga-v3".to_owned(), MouseOverrides { mouse_dpi: Some(45_000), mouse_poll_rate_hz: Some(1000), mouse_dpi_stages: Some(vec![800, 45_000]), ..Default::default() }),
         ].into());
         assert_eq!(switch_values(&profile, &NAGA_V2_HYPERSPEED), Some((Some(1600), None)), "250 Hz is not a V2 rate");
         assert_eq!(switch_values(&profile, &NAGA_V3_PRO), Some((Some(45_000), Some(1000))));

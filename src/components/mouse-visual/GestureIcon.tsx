@@ -4,7 +4,7 @@
 // Sidearm (a broken ring), synced (two chain links), the same on another button
 // (two overlapping squares).
 
-type Mark = "longPress" | "doublePress" | "triplePress" | "live" | "link" | "copy";
+type Mark = "longPress" | "doublePress" | "triplePress" | "live" | "memory" | "link" | "copy";
 
 export function GestureIcon({ mark }: { mark: Mark }) {
   return (
@@ -23,6 +23,11 @@ export function GestureIcon({ mark }: { mark: Mark }) {
         <g fill="none" stroke="currentColor" strokeWidth="1.5">
           <rect x="3" y="0.75" width="6.5" height="6" rx="1.5" />
           <rect x="6.5" y="3.25" width="6.5" height="6" rx="1.5" />
+        </g>
+      ) : mark === "memory" ? (
+        <g fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="4" y="1.75" width="8" height="6.5" rx="1.2" />
+          <path d="M1.5 3.5h2.5M1.5 6.5h2.5M12 3.5h2.5M12 6.5h2.5" />
         </g>
       ) : mark === "live" ? (
         <path d="M8 1.5a3.5 3.5 0 1 1-3.3 2.3M8 1.5V0" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />

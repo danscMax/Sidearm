@@ -17,10 +17,11 @@ export function useActionPicker(deps: {
     setActionPickerOpen,
   } = deps;
 
-  function handleOpenActionPicker(controlId: ControlId, binding: Binding | null) {
+  function handleOpenActionPicker(controlId: ControlId, binding: Binding | null, layerOverride?: Layer) {
     if (!effectiveProfileId || !config?.physicalControls.some((c) => c.id === controlId)) return;
-    if (isOfflineLayer(deps.selectedLayer) && !deps.offlinePreview?.controls.some((control) =>
-      control.controlId === controlId && control.layer === deps.selectedLayer && control.editable)) return;
+    const targetLayer = layerOverride ?? deps.selectedLayer;
+    if (isOfflineLayer(targetLayer) && !deps.offlinePreview?.controls.some((control) =>
+      control.controlId === controlId && control.layer === targetLayer && control.editable)) return;
     // Opening and cancelling are read-only. A new binding is created on Save.
     deps.setSelectedControlId(controlId);
     setActionPickerBindingId(binding?.id ?? null);

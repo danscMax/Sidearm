@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { AppConfig, ControlId, Layer } from "../lib/config";
+import type { AppConfig, ControlId, Layer, MouseActionKind } from "../lib/config";
 import { isOfflineLayer, MAX_SEQUENCE_STEPS, NATIVE_HYPERSHIFT_TRIGGERS, type HypershiftTrigger } from "../lib/config";
 import { displayNameForControlId, labelForLayer, offlineAssignmentLabel } from "../lib/labels";
 import { ACTION_CATEGORIES, MOUSE_ACTION_OPTIONS } from "../lib/constants";
-import { isBuiltinControl, isKeyButton, type OfflineControl } from "../lib/onboard-mapping";
+import { classifyHardwarePlayability, isBuiltinControl, isKeyButton, type OfflineControl } from "../lib/onboard-mapping";
 import { canBeHypershift2Trigger, controlLayout, hypershift2ControlId, layoutControlId, setHypershift2Trigger } from "../lib/devices";
 import { getNativeModel, listNativeMice, liveTestAction, listenEncodedKeyEvent, normalizeCommandError } from "../lib/backend";
 import { uiText } from "../lib/ui-text";
@@ -27,6 +27,7 @@ import {
 } from "../lib/config-editing";
 import { MenuItemsEditor } from "./MenuItemsEditor";
 import { CategoryIcon, ChevronIcon } from "./icons";
+import { GestureIcon } from "./mouse-visual/GestureIcon";
 import { applyMenuEdits, isMenuIncomplete, NO_MENU_EDITS, type MenuEdits } from "../lib/menu-phrase";
 import { bindingUses, otherMenuUses } from "../lib/menu-arrange";
 import { snippetPlaceCounts } from "../lib/snippet-search";
@@ -298,6 +299,11 @@ function PickerTab({
   const syncKey = otherMice.length > 0 && profileId && selectedLayer && controlId ? slotKey(profileId, selectedLayer, gesture, controlId) : null;
   const [pristine] = useState((): PickerSnapshot => {
     const initial = createInitialDrafts(existingAction, binding, config.profiles, config.snippetLibrary);
+    const offlineNative = offline && !existingAction && offlineControl?.native
+      ? (offlineControl.native as MouseActionKind)
+      : null;
+    const offlineCategory = existingAction?.type
+      ?? (offlineNative ? "mouseAction" : offlineControl?.kind === "preserved" ? "shortcut" : "disabled");
     return {
       gesture,
       layer: selectedLayer,
@@ -308,14 +314,16 @@ function PickerTab({
       // reassigned. Snippets already backed by the library don't need re-saving.
       saveToLibraryDraft: !(existingAction?.type === "textSnippet" && existingAction.payload.source === "libraryRef"),
       base: config,
-      activeCategory: offline ? existingAction?.type ?? "disabled"
+      activeCategory: offline ? offlineCategory
         : isCurrentTrigger ? "hypershift"
         : isCurrentTrigger2 ? "hypershift2"
         : !existingAction ? "native"
         : enterPhraseOf(existingAction, config.snippetLibrary) !== null ? "textSnippet"
         : ACTION_CATEGORIES.find((c) => c.actionType === existingAction.type)?.id ?? "shortcut",
       shortcutDraft: initial.shortcut,
-      mouseDraft: initial.mouse,
+      mouseDraft: offlineNative
+        ? { action: offlineNative, ctrl: false, shift: false, alt: false, win: false }
+        : initial.mouse,
       textDraft: initial.text,
       launchDraft: initial.launch,
       mediaDraft: initial.media,
@@ -425,6 +433,12 @@ function PickerTab({
     if (saveDisabled) return null;
     if (selectedLayer && isOfflineLayer(selectedLayer)) {
       if (!profileId || !controlId) return null;
+      const untouchedOfflineNative = !binding
+        && Boolean(offlineControl?.native)
+        && effectiveCategory === "mouseAction"
+        && mouseDraft.action === offlineControl?.native
+        && !mouseDraft.ctrl && !mouseDraft.shift && !mouseDraft.alt && !mouseDraft.win;
+      if (untouchedOfflineNative) return config;
       const payload = effectiveCategory === "native" ? null
         : effectiveCategory === "disabled" ? "silent"
         : effectiveCategory === "shortcut" ? shortcutDraft : mouseDraft;
@@ -635,6 +649,29 @@ function PickerTab({
     ? t(effectiveCategory === "hypershift" ? "picker.hypershiftPreview"
       : effectiveCategory === "hypershift2" ? "picker.hypershift2Preview" : "picker.nativePreview")
     : describeAction(effectiveCategory, drafts, t, config.profiles);
+  const hardwareStatus = !offline && builtinControl && !roleCategory && selectedLayer && controlId && profileId
+    ? (() => {
+        const draftAction = buildAction({ effectiveCategory, existingAction, drafts, t, profiles: config.profiles });
+        const draftBinding = {
+          id: binding?.id ?? "__draft__",
+          profileId,
+          layer: selectedLayer,
+          controlId,
+          label: "",
+          actionId: draftAction.id,
+          enabled: true,
+          triggerMode: gesture === "press" ? triggerModeDraft : gesture,
+        };
+        return classifyHardwarePlayability(config, profileId, selectedLayer, controlId, draftBinding, draftAction, {
+          checkHs2: Boolean(layout?.hypershift2Triggers?.length),
+        });
+      })()
+    : null;
+  const hardwareReason = hardwareStatus?.reason
+    ? hardwareStatus.reason === "actionType"
+      ? t("offline.reason.actionType", { type: t(`action.type.${hardwareStatus.actionType ?? "disabled"}`) })
+      : t(`offline.reason.${hardwareStatus.reason}`)
+    : null;
   const offlineSummary = offlineChoice === "silent" ? t("offline.silent")
     : offlineChoice === null ? t("offline.inherit")
     : offlineAssignmentLabel(offlineControl ?? { kind: "unknown", editable: false },
@@ -697,6 +734,19 @@ function PickerTab({
     if (edited) setAskDiscard(true); else onCancel();
   }
 
+  const liveActionForOffline = offline && profileId && controlId && selectedLayer
+    ? (() => {
+        const liveLayer = selectedLayer === "offlineHypershift" ? "hypershift" : "standard";
+        const liveBinding = findBinding(config, profileId, liveLayer, controlId)
+          ?? (liveLayer === "hypershift" ? findBinding(config, profileId, "standard", controlId) : undefined);
+        const liveAction = liveBinding?.enabled ? config.actions.find((a) => a.id === liveBinding.actionId) : undefined;
+        return liveAction && !isPlaceholderAction(liveAction) ? liveAction : null;
+      })()
+    : null;
+  const offlineLiveLabel = liveActionForOffline
+    ? liveActionForOffline.displayName || t(`action.type.${liveActionForOffline.type}`)
+    : null;
+
   return (
     <>
     <ModalShell
@@ -727,6 +777,9 @@ function PickerTab({
               <p className="action-picker__subtitle">{controlLabel}{layerLabel ? ` · ${layerLabel}` : ""}</p>
             ) : null}
             {offline ? <p className="action-picker__subtitle">{t("picker.offlineHint")}</p> : null}
+            {offline && offlineLiveLabel ? (
+              <p className="action-picker__subtitle">{t("picker.offlineLiveAction", { label: offlineLiveLabel })}</p>
+            ) : null}
           </div>
           <CloseButton onClick={requestClose} ariaLabel={t("common.close")} className="action-picker__close" />
         </div>
@@ -1005,6 +1058,18 @@ function PickerTab({
         <p className="action-picker__preview">
           <span className="action-picker__preview-label">{t("picker.previewLabel")}</span>
           <span className="action-picker__preview-text">{previewText}</span>
+          {hardwareStatus ? (
+            <span
+              className={`action-picker__hw-badge action-picker__hw-badge--${hardwareStatus.location}`}
+              title={hardwareReason ?? t("offline.inMouseTooltip")}
+            >
+              <GestureIcon mark={hardwareStatus.location === "mouse" ? "memory" : "live"} />
+              <span>
+                {t(hardwareStatus.location === "mouse" ? "offline.badgeInMouse" : "offline.badgeSidearmOnly")}
+                {hardwareReason ? ` · ${hardwareReason}` : ""}
+              </span>
+            </span>
+          ) : null}
         </p>
         {!offline && builtinControl ? (
           selectedLayer === "standard" || selectedLayer === "hypershift" ? (

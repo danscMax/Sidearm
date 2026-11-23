@@ -483,6 +483,68 @@ async function main() {
     await world.edit(V2, (state) => { state.asleep = false; state.asleepDelayMs = 0; });
     check("…and writes its live maps", await world.waitFor(() => world.log(), /Razer Naga V2 HyperSpeed verified \d+ live assignments/, 40000, mark));
     await world.quit();
+
+    // 10. Opt-in Hybrid Hardware Bank (isolated after scenarios 1-9 with an
+    // unprepared slot 2): verifies flash records (native Ctrl+C + consumer
+    // phrase signal), live bank switch via ProfileSwitch, live records,
+    // Sidearm phrase dispatch from the hybrid bank, and watchdog restore to
+    // clean bank 1 with zero Sidearm signals in the live map.
+    const hybridConfig = world.config();
+    const plainProfile = hybridConfig.profiles.find((p) => p.id === "e2e-plain");
+    plainProfile.deviceSlots = { [V3]: 2 };
+    plainProfile.deviceMouse = { [V3]: { hardwareBank: true } };
+    hybridConfig.actions.push(
+      { id: "e2e-plain-native", type: "shortcut", displayName: "E2E plain key", payload: { key: "C", ctrl: true, shift: false, alt: false, win: false } },
+      { id: "e2e-plain-phrase", type: "textSnippet", displayName: "E2E plain phrase", payload: { source: "inline", text: "hi", pasteMode: "sendText", tags: [] } },
+    );
+    hybridConfig.bindings.push(
+      { id: "e2e-plain-native-binding", profileId: "e2e-plain", layer: "standard", controlId: "v3_thumb_01", label: "Copy", actionId: "e2e-plain-native", enabled: true },
+      { id: "e2e-plain-phrase-binding", profileId: "e2e-plain", layer: "standard", controlId: "v3_thumb_02", label: "Phrase", actionId: "e2e-plain-phrase", enabled: true },
+    );
+    world.writeConfig(hybridConfig);
+    // Start with an unprepared bank 2 so cold-start store + verification is exercised.
+    await world.edit(V3, (state) => {
+      state.records = state.records.filter(([bank]) => bank !== 2);
+    });
+    appMark = world.log().length;
+    mark = world.restoreLog().length;
+    world.start();
+    check("hybrid start writes live maps and starts watchdog", await world.startedFully(appMark));
+    check("hybrid bank 2 verified stored in background", await world.waitFor(() => world.log(), /Razer Naga V3 Pro profile `e2e-plain` verified in bank 2/, 25000, appMark));
+    const v3Stored = world.mouse(V3);
+    const findRecord = (state, bank, button, layer) => state.records.find(([b, n, l]) => b === bank && n === button && l === layer)?.[3];
+    const bank2Native = findRecord(v3Stored, 2, 0x40, 0);
+    const bank2Consumer = findRecord(v3Stored, 2, 0x41, 0);
+    check("…bank 2 flash holds native Ctrl+C on thumb 1", Boolean(bank2Native && bank2Native[0] === 0x02 && bank2Native[2] === 0x01 && bank2Native[3] === 0x06), JSON.stringify(bank2Native));
+    check("…bank 2 flash holds consumer signal on thumb 2", Boolean(bank2Consumer && bank2Consumer[0] === 0x0a && bank2Consumer[2] === 0x00 && bank2Consumer[3] === v3Usage(2, 0)), JSON.stringify(bank2Consumer));
+    await sleep(500);
+    const switchMark = world.log().length;
+    await world.press(V3, v3Usage(6, 0));
+    check("ProfileSwitch switches V3 to hybrid bank 2", await world.waitFor(() => world.log(), /Razer Naga V3 Pro profile `E2E plain` switched to live bank 2/, 10000, switchMark));
+    const v3Hybrid = world.mouse(V3);
+    check("…mouse active bank is now hybrid bank 2", v3Hybrid.activeBank === 2, JSON.stringify({ active: v3Hybrid.activeBank }));
+    const liveNative = findRecord(v3Hybrid, 0, 0x40, 0);
+    const liveConsumer = findRecord(v3Hybrid, 0, 0x41, 0);
+    check("…live map holds native Ctrl+C on thumb 1", Boolean(liveNative && liveNative[0] === 0x02 && liveNative[2] === 0x01 && liveNative[3] === 0x06), JSON.stringify(liveNative));
+    check("…live map holds consumer signal on thumb 2", Boolean(liveConsumer && liveConsumer[0] === 0x0a && liveConsumer[2] === 0x00 && liveConsumer[3] === v3Usage(2, 0)), JSON.stringify(liveConsumer));
+    const phraseMark = world.log().length;
+    await world.press(V3, v3Usage(2, 0));
+    check("…Sidearm-only phrase still dispatches from hybrid bank", await world.waitFor(() => world.log(), (t) => dispatched(t, {
+      controlId: "v3_thumb_02",
+      layer: "standard",
+      actionId: "e2e-plain-phrase",
+      profileId: "e2e-plain",
+    }), 5000, phraseMark));
+    await world.kill();
+    check("watchdog restores clean offline bank 1 from hybrid bank 2", await world.waitFor(() => world.restoreLog(), /Razer Naga V3 Pro left the hybrid bank 2: bank 1 plays/, 30000, mark));
+    const v3Restored = world.mouse(V3);
+    check("…mouse active bank is back on clean bank 1", v3Restored.activeBank === 1, JSON.stringify({ active: v3Restored.activeBank }));
+    const restoredWrong = [
+      ...bankRecords(v3Restored, 1).filter(([, button, layer, record]) => JSON.stringify(findRecord(v3Restored, 0, button, layer)) !== JSON.stringify(record)),
+      ...liveRecords(v3Restored).filter(([, button, layer]) => findRecord(v3Restored, 1, button, layer) === undefined),
+    ];
+    check("…restored live map matches clean bank 1 with zero Sidearm signals", restoredWrong.length === 0 && !liveRecords(v3Restored).some(([, , , rec]) => sidearmSignal(rec)), JSON.stringify({ restoredWrong, live: liveRecords(v3Restored) }));
+    check("…and hybrid kill restorer ends", await world.waitFor(() => world.restoreLog(), restorersDone, 30000, mark));
   } finally {
     world.cleanup();
   }

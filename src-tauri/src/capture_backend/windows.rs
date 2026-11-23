@@ -4780,9 +4780,10 @@ fn spawn_capture_helper(
                     } else if pressed {
                         crate::mouse_memory::live_overlay::note_input(model, signal, true);
                     }
-                    if !crate::mouse_memory::live_overlay::events_allowed(model) {
+                    let offline = crate::mouse_memory::live_overlay::is_offline(model);
+                    if !crate::mouse_memory::live_overlay::events_allowed(model) || (pressed && offline) {
                         // Counted, logged as one line once the map is ready.
-                        if pressed {
+                        if pressed && !offline {
                             crate::mouse_memory::live_overlay::note_dropped(model);
                         }
                         continue;

@@ -817,9 +817,17 @@ fn release_manual_profile(app: &AppHandle, expected: Option<&str>) {
     log::info!("[tray] back to the app rules");
     if let Ok(config_dir) = resolve_config_dir(app)
         && let Ok(load) = load_or_initialize_config(&config_dir)
-        && let Ok(result) = window_capture::capture_active_window_with_resolution(&load.config, &app.package_info().name, None)
     {
-        capture_backend::emit_profile_resolved_and_notify(app, &store, &result, &load.config);
+        if let Ok(result) = window_capture::capture_active_window_with_resolution(&load.config, &app.package_info().name, None) {
+            if result.ignored {
+                // Sidearm or shell is in front: still reconcile hardware back to fallback profile.
+                capture_backend::follow_manual_profile(&load.config.settings.fallback_profile_id, Some(&load.config), None);
+            } else {
+                capture_backend::emit_profile_resolved_and_notify(app, &store, &result, &load.config);
+            }
+        }
+        rebuild_tray_menu_from_config(app, &load.config);
+        return;
     }
     rebuild_tray_menu(app);
 }
@@ -1707,6 +1715,8 @@ async fn save_config(
     config: AppConfig,
 ) -> Result<SaveConfigResponse, CommandError> {
     let config_dir = resolve_config_dir(&app)?;
+    #[cfg(target_os = "windows")]
+    let bank_config_dir = config_dir.clone();
     // What this process believes is currently on disk. If another instance has
     // written config.json since, the guarded save below returns
     // `config_changed_on_disk` instead of clobbering those edits.
@@ -1721,6 +1731,12 @@ async fn save_config(
     accept_config(&app, &result.config, result.stamp);
 
     reload_active_config(&app, &runtime_store, &runtime_controller, &result.config, result.warnings.len(), true)?;
+
+    // Invalidate verified hybrid banks and reschedule background bank storage even
+    // when live maps did not change (e.g. toggling hardwareBank, editing deviceSlots,
+    // offline overrides, or bank DPI).
+    #[cfg(target_os = "windows")]
+    mouse_memory::live_overlay::invalidate_and_schedule_bank_store(result.config.clone(), bank_config_dir);
 
     // Keep the tray's profile list / active marker in sync after a save.
     rebuild_tray_menu_from_config(&app, &result.config);
@@ -2280,11 +2296,22 @@ async fn set_input_capture_mode(app: AppHandle, enabled: bool, check_extra_contr
                 }
             }
             capture_backend::SUPPRESS_EXECUTION.store(enabled, Ordering::Relaxed);
+            if let Err(error) = mouse_memory::live_overlay::set_input_test_mode(enabled) {
+                log::warn!("[naga-live] input test mode ({enabled}) bank switch skipped: {error}");
+            }
             Ok(())
         }).await.map_err(|error| CommandError::internal(format!("button check task failed: {error}")))?;
     }
     let _ = (app, check_extra_controls);
     capture_backend::SUPPRESS_EXECUTION.store(enabled, Ordering::Relaxed);
+    #[cfg(target_os = "windows")]
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(error) = mouse_memory::live_overlay::set_input_test_mode(enabled) {
+            log::warn!("[naga-live] input test mode ({enabled}) bank switch skipped: {error}");
+        }
+    })
+    .await
+    .map_err(|error| CommandError::internal(format!("input test mode task failed: {error}")))?;
     Ok(())
 }
 
@@ -2378,6 +2405,7 @@ async fn stop_runtime(
 ) -> Result<RuntimeStateSummary, CommandError> {
     let summary = runtime_transition(&runtime_controller, |controller| controller.stop(), |result| {
         result.map_err(|message| CommandError::from_ui("runtime_stop_failed", crate::ui_text!("error.runtimeStop", "Could not stop capture: {reason}", reason = message)))?;
+        capture_backend::reset_applied_profile();
         let summary = runtime_store.lock().recover_poison().stop();
         app.emit(EVENT_RUNTIME_STOPPED, &summary).map_err(|error| {
             CommandError::internal(format!("Failed to emit runtime_stopped event: {error}"))
@@ -3826,15 +3854,25 @@ async fn release_sidearm_bank(app: AppHandle, device_id: String) -> Result<bool,
 /// bubble saying where that way back is.
 #[cfg(target_os = "windows")]
 pub(crate) fn mouse_offline_mode_changed(model: &'static device_catalog::NativeModel, offline: bool) {
-    let Some(app) = system_events::app() else { return };
-    let any = !mouse_memory::live_overlay::offline_models().is_empty();
-    mouse_status::set_state(Some(app), mouse_status::StatusKind::MouseOffline, any);
-    rebuild_tray_menu(app);
-    if offline && let Ok(load) = load_or_initialize_config(&resolve_app_paths(app).config_dir) {
-        let text = crate::ui_text!("runtime.mouseOfflineOsd", "{model} offline (profile button) — click here or the tray item to go back to Sidearm", model = model.short_name);
-        // Long enough to reach with the mouse.
-        let settings = config::Settings { osd_duration_ms: OFFLINE_OSD_MS, ..load.config.settings };
-        show_osd_with_offline(app, "", &crate::ui_text::native(&text), &settings, true);
+    // Unit tests never initialize `system_events::app()`; skipping the tray/OSD
+    // path under `cfg(test)` keeps Tauri window/comctl32 v6 imports
+    // (`TaskDialogIndirect`) out of the manifest-less `--lib` test binary.
+    #[cfg(test)]
+    {
+        let _ = (model, offline, mouse_status::StatusKind::MouseOffline, OFFLINE_OSD_MS);
+    }
+    #[cfg(not(test))]
+    {
+        let Some(app) = system_events::app() else { return };
+        let any = !mouse_memory::live_overlay::offline_models().is_empty();
+        mouse_status::set_state(Some(app), mouse_status::StatusKind::MouseOffline, any);
+        rebuild_tray_menu(app);
+        if offline && let Ok(load) = load_or_initialize_config(&resolve_app_paths(app).config_dir) {
+            let text = crate::ui_text!("runtime.mouseOfflineOsd", "{model} offline (profile button) — click here or the tray item to go back to Sidearm", model = model.short_name);
+            // Long enough to reach with the mouse.
+            let settings = config::Settings { osd_duration_ms: OFFLINE_OSD_MS, ..load.config.settings };
+            show_osd_with_offline(app, "", &crate::ui_text::native(&text), &settings, true);
+        }
     }
 }
 
@@ -4650,16 +4688,40 @@ pub fn run() {
                             other.strip_prefix("profile:").unwrap_or(other).to_string();
                         let app = app.clone();
                         tauri::async_runtime::spawn(async move {
-                            // The override is already honored everywhere the resolver
-                            // runs (dispatch, foreground watcher, OSD) — see runtime.rs.
-                            if let Ok(mut store) = app.state::<Arc<Mutex<RuntimeStore>>>().lock() {
-                                store.set_manual_profile_override(Some(profile_id.clone()));
-                            }
+                            // Allocate the revision while holding RuntimeStore so lock
+                            // order strictly matches hardware reconciliation order.
+                            let revision = {
+                                if let Ok(mut store) = app.state::<Arc<Mutex<RuntimeStore>>>().lock() {
+                                    #[cfg(target_os = "windows")]
+                                    let rev = Some(mouse_memory::live_overlay::next_profile_revision());
+                                    #[cfg(not(target_os = "windows"))]
+                                    let rev: Option<u64> = None;
+                                    store.set_manual_profile_override(Some(profile_id.clone()));
+                                    rev
+                                } else {
+                                    None
+                                }
+                            };
                             // Chosen by hand again: a pending way back to the rules is off.
                             RULES_BACK.fetch_add(1, Ordering::SeqCst);
-                            capture_backend::follow_manual_profile(&profile_id);
+                            let loaded = resolve_config_dir(&app)
+                                .ok()
+                                .and_then(|dir| load_or_initialize_config(&dir).ok());
+                            // Only apply hardware if this tray selection is still the active override.
+                            let still_current = app
+                                .state::<Arc<Mutex<RuntimeStore>>>()
+                                .lock()
+                                .ok()
+                                .is_some_and(|store| store.manual_profile_override() == Some(profile_id.as_str()));
+                            if still_current {
+                                capture_backend::follow_manual_profile(&profile_id, loaded.as_ref().map(|l| &l.config), revision);
+                            }
                             let _ = app.emit(EVENT_TRAY_PROFILE_CHANGED, &profile_id);
-                            rebuild_tray_menu(&app);
+                            if let Some(loaded) = loaded {
+                                rebuild_tray_menu_from_config(&app, &loaded.config);
+                            } else {
+                                rebuild_tray_menu(&app);
+                            }
                             log::info!("[tray] active profile set to `{profile_id}` from tray");
                         });
                     }

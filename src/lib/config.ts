@@ -131,6 +131,8 @@ export interface MouseOverrides {
   mousePollRateHz?: number;
   /** Stages (1–5) for DPI Up/Down; mouseDpi is one of them. */
   mouseDpiStages?: number[];
+  /** Opt-in hybrid hardware bank mode for this mouse (V3 onboard banks). */
+  hardwareBank?: boolean;
 }
 
 /** A physical input device; its controls live in `physicalControls` tagged

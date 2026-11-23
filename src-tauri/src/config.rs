@@ -17,7 +17,7 @@ pub(crate) const CONFIG_FILE_NAME: &str = "config.json";
 /// then sees a newer config and leaves it alone instead of quarantining it as
 /// corrupt (measured 2026-11-11: v0.11.8 replaced a config holding `longPress`
 /// with the default one).
-const SCHEMA_VERSION: i32 = 13;
+const SCHEMA_VERSION: i32 = 14;
 pub const MAX_SEQUENCE_STEPS: usize = 200;
 pub(crate) const DEFAULT_GLOBAL_SHORTCUT: &str = "ctrl+alt+n";
 const CONFIG_SCHEMA_JSON: &str = include_str!(concat!(
@@ -368,6 +368,10 @@ pub struct MouseOverrides {
     /// DPI Up/Down stages; `mouse_dpi` is one of them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mouse_dpi_stages: Option<Vec<u16>>,
+    /// Opt-in hybrid hardware bank mode for this mouse (V3 onboard banks):
+    /// native keys play directly from mouse flash, Sidearm-only actions stay on silent signals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hardware_bank: Option<bool>,
 }
 
 impl Profile {
@@ -1152,7 +1156,7 @@ fn migrate_devices(config: &mut AppConfig) {
     if config.devices.is_empty() {
         config.devices.push(builtin_naga_device());
     }
-    if matches!(config.version, 2..=12) {
+    if matches!(config.version, 2..=13) {
         config.version = SCHEMA_VERSION;
     }
 }
@@ -1169,6 +1173,7 @@ fn migrate_mouse_settings(config: &mut AppConfig) {
             mouse_dpi: profile.mouse_dpi.take(),
             mouse_poll_rate_hz: profile.mouse_poll_rate_hz.take(),
             mouse_dpi_stages: profile.mouse_dpi_stages.take(),
+            hardware_bank: None,
         };
         if legacy == MouseOverrides::default() {
             continue;
@@ -1705,11 +1710,20 @@ pub(crate) fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarnin
         });
     }
 
+    let mut claimed_slots: std::collections::HashMap<(&str, u8), &str> = std::collections::HashMap::new();
     for profile in &config.profiles {
         for (mouse, own) in profile.device_mouse.iter().flatten() {
             if let (Some(stages), Some(start)) = (&own.mouse_dpi_stages, own.mouse_dpi)
                 && !stages.contains(&start) {
                 errors.push(format!("profile `{}` mouseDpi of `{mouse}` must be one of its mouseDpiStages.", profile.id));
+            }
+        }
+        for (device_id, &slot) in profile.device_slots.iter().flatten() {
+            if let Some(first) = claimed_slots.insert((device_id.as_str(), slot), profile.id.as_str()) {
+                errors.push(format!(
+                    "profile `{}` slot {slot} of `{device_id}` is already assigned to profile `{first}`.",
+                    profile.id
+                ));
             }
         }
     }
@@ -3643,7 +3657,7 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let mut config = default_seed_config();
         let own = |dpi, stages: Vec<u16>| Some([("razer-naga".to_owned(), MouseOverrides {
-            mouse_dpi: dpi, mouse_poll_rate_hz: None, mouse_dpi_stages: Some(stages),
+            mouse_dpi: dpi, mouse_poll_rate_hz: None, mouse_dpi_stages: Some(stages), hardware_bank: None,
         })].into());
         config.profiles[0].device_mouse = own(Some(800), vec![400, 800, 1600]);
         save_config(dir.path(), config.clone(), None).expect("save stages");
@@ -3656,6 +3670,29 @@ mod tests {
         }
         config.profiles[0].device_mouse = own(Some(800), vec![400, 1600]);
         assert!(save_config(dir.path(), config.clone(), None).is_err(), "start DPI outside its stages");
+    }
+
+    #[test]
+    fn hardware_bank_roundtrips_and_v13_migrates_to_v14() {
+        let dir = tempdir().expect("tempdir");
+        let mut config = default_seed_config();
+        config.profiles[0].device_mouse = Some([(
+            "razer-naga-v3".to_owned(),
+            MouseOverrides { hardware_bank: Some(true), ..Default::default() },
+        )].into());
+        save_config(dir.path(), config.clone(), None).expect("save hardwareBank");
+        let loaded = load_or_initialize_config(dir.path()).expect("reload hardwareBank");
+        assert_eq!(loaded.config.version, SCHEMA_VERSION);
+        assert_eq!(
+            loaded.config.profiles[0].mouse_for("razer-naga-v3").and_then(|own| own.hardware_bank),
+            Some(true),
+        );
+
+        let mut v13 = serde_json::to_value(default_seed_config()).expect("json");
+        v13["version"] = 13.into();
+        std::fs::write(dir.path().join(CONFIG_FILE_NAME), v13.to_string()).expect("write v13");
+        let migrated = load_or_initialize_config(dir.path()).expect("load v13");
+        assert_eq!(migrated.config.version, SCHEMA_VERSION);
     }
 
     #[test]
@@ -3715,7 +3752,7 @@ mod tests {
             let loaded = load_or_initialize_config(dir.path()).unwrap();
             assert!(!loaded.created_default);
             assert_eq!(serde_json::to_value(&loaded.config).unwrap(), serde_json::to_value(&original).unwrap());
-            assert_eq!(loaded.config.version, 13);
+            assert_eq!(loaded.config.version, SCHEMA_VERSION);
             assert!(!has_quarantine_file(dir.path()));
             assert_eq!(loaded.warnings.iter().any(|w| w.code == "config_recovered_from_backup"), name != CONFIG_FILE_NAME);
             let imported = read_and_migrate_config_file(&dir.path().join(name)).unwrap();
@@ -4225,7 +4262,7 @@ mod tests {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (13, 0x4291_056d_e060_7ae7);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (14, 0x9862_769f_7051_126e);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')

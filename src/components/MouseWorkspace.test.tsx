@@ -207,4 +207,89 @@ describe("independent mouse readings", () => {
     await act(async () => finish(dispose));
     expect(dispose).toHaveBeenCalledOnce();
   });
+
+  it("shows the active profile's in-mouse vs Sidearm-only summary in Mouse memory", async () => {
+    const config = makeConfig({
+      actions: [
+        { id: "a_key", type: "shortcut", displayName: "Copy", payload: { key: "C", ctrl: true, shift: false, alt: false, win: false } },
+        { id: "a_txt", type: "textSnippet", displayName: "Hi", payload: { source: "inline", text: "hi", pasteMode: "sendText", tags: [] } },
+      ],
+      bindings: [
+        { id: "b1", profileId: "p1", layer: "standard", controlId: "thumb_01", actionId: "a_key", label: "Copy", enabled: true },
+        { id: "b2", profileId: "p1", layer: "hypershift", controlId: "thumb_01", actionId: "a_txt", label: "Hi", enabled: true },
+      ],
+    });
+    render(
+      <MouseWorkspace
+        activeConfig={config}
+        deviceId="razer-naga"
+        section="memory"
+        profiles={config.profiles}
+        activeProfile={config.profiles[0]}
+        runtimeProfileId="p1"
+        updateDraft={vi.fn()}
+        mouseStates={[]}
+      />,
+    );
+    expect(screen.getByText(i18n.t("offline.memorySummary", { inMouse: 1, sidearmOnly: 1 }))).toBeTruthy();
+  });
+
+  it("shows Hardware bank toggle on non-offline V3 slots, guards dedicated offline slot, and warns on conflict", async () => {
+    const model = await backend.getNativeModel();
+    vi.mocked(backend.getNativeModel).mockResolvedValue({ ...model, deviceId: NAGA_V3_DEVICE_ID, banks: true });
+    vi.mocked(backend.getOnboardBanks).mockResolvedValue({ assigned: [1, 2], active: 1 });
+    vi.mocked(backend.getSidearmBank).mockResolvedValue(3);
+
+    const base = makeConfig();
+    const config: AppConfig = {
+      ...base,
+      profiles: [
+        { ...base.profiles[0], deviceSlots: { [NAGA_V3_DEVICE_ID]: 1 } },
+        { ...base.profiles[1], deviceSlots: { [NAGA_V3_DEVICE_ID]: 2 } },
+      ],
+    };
+    const updates = vi.fn();
+    const { rerender } = render(
+      <MouseWorkspace
+        activeConfig={config}
+        deviceId={NAGA_V3_DEVICE_ID}
+        section="memory"
+        profiles={config.profiles}
+        activeProfile={config.profiles[0]}
+        runtimeProfileId="p1"
+        updateDraft={updates}
+        mouseStates={[]}
+      />,
+    );
+
+    const p1Toggle = await screen.findByRole("checkbox", { name: i18n.t("mouse.hardwareBankTitle", { name: config.profiles[0].name }) });
+    const p2Toggle = screen.getByRole("checkbox", { name: i18n.t("mouse.hardwareBankTitle", { name: config.profiles[1].name }) });
+    expect(p1Toggle.hasAttribute("disabled")).toBe(true);
+    expect(p2Toggle.hasAttribute("disabled")).toBe(false);
+    expect(screen.getByText(i18n.t("mouse.hardwareBankOfflineGuard"))).toBeTruthy();
+
+    fireEvent.click(p2Toggle);
+    expect(updates).toHaveBeenCalledTimes(1);
+    const updated = updates.mock.calls[0][0](config) as AppConfig;
+    expect(updated.profiles[1].deviceMouse?.[NAGA_V3_DEVICE_ID]?.hardwareBank).toBe(true);
+
+    // If a profile with hardwareBank enabled becomes the dedicated offline profile, show the conflict warning.
+    const conflictConfig: AppConfig = {
+      ...updated,
+      settings: { ...updated.settings, offlineProfileId: "p2" },
+    };
+    rerender(
+      <MouseWorkspace
+        activeConfig={conflictConfig}
+        deviceId={NAGA_V3_DEVICE_ID}
+        section="memory"
+        profiles={conflictConfig.profiles}
+        activeProfile={conflictConfig.profiles[1]}
+        runtimeProfileId="p2"
+        updateDraft={updates}
+        mouseStates={[]}
+      />,
+    );
+    expect(screen.getByText(i18n.t("mouse.hardwareBankOfflineConflict", { name: config.profiles[1].name }))).toBeTruthy();
+  });
 });

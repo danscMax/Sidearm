@@ -40,6 +40,13 @@ it("keeps the live S mark and gives it the exact firmware result", () => {
   expect(container.querySelector(".btn-legend__live")?.getAttribute("data-tip")).toBe(i18n.t("offline.tooltip", { action: "Ctrl+C" }));
 });
 
+it("renders a calm memory icon with tooltip when stored in mouse memory", () => {
+  const entry = { ...base, inMouse: true };
+  const { container } = render(<Cell entry={entry} />);
+  expect(container.querySelector(".btn-legend__memory")?.getAttribute("data-tip")).toBe(i18n.t("offline.inMouseTooltip"));
+  expect(tooltipText(entry, "")).toContain(i18n.t("offline.inMouseTooltip"));
+});
+
 function preview(control: Partial<OfflineControl>): OfflinePreview {
   return { target: { state: "written" }, controls: [{ controlId: "thumb_01", layer: "offline", kind: "preserved", editable: true, ...control }] };
 }

@@ -37,4 +37,19 @@ describe("per-mouse profile settings", () => {
     expect(config.profiles[0].deviceSlots).toBeUndefined();
     expect(config.profiles[1].deviceSlots).toEqual({ "razer-naga-v3": 2 });
   });
+
+  it("persists hardwareBank when enabled and normalizes false to undefined", () => {
+    let config = setProfileMouse(makeConfig(), "p1", "razer-naga-v3", { hardwareBank: true });
+    expect(config.profiles[0].deviceMouse).toEqual({
+      "razer-naga-v3": { hardwareBank: true },
+    });
+    config = setProfileMouse(config, "p1", "razer-naga-v3", { hardwareBank: false });
+    expect(config.profiles[0].deviceMouse).toBeUndefined();
+
+    config = setProfileMouse(makeConfig(), "p1", "razer-naga-v3", { mouseDpi: 1600, hardwareBank: true });
+    config = setProfileMouse(config, "p1", "razer-naga-v3", { hardwareBank: false });
+    expect(config.profiles[0].deviceMouse).toEqual({
+      "razer-naga-v3": { mouseDpi: 1600 },
+    });
+  });
 });

@@ -39,6 +39,7 @@ export function withOfflineAssignment(config: AppConfig, profileId: string, laye
     isHypershift2Trigger: false,
     extras: undefined,
     sidearmOnly: false,
+    inMouse: false,
     syncedWith: undefined,
     sameAs: undefined,
   };
@@ -152,10 +153,11 @@ export function tooltipText(entry: ControlSurfaceEntry, unassignedLabel: string)
   }
   const cat = ACTION_CATEGORIES.find((c) => c.actionType === entry.action!.type);
   const catLabel = cat ? i18n.t(cat.label) : "";
+  const inMouse = entry.inMouse ? `\n${i18n.t("offline.inMouseTooltip")}` : "";
   const live = entry.sidearmOnly ? `\n${i18n.t("offline.tooltip", { action: entry.offlineActionLabel ?? i18n.t("offline.silentAction") })}` : "";
   const synced = entry.syncedWith?.length ? `\n${i18n.t("mouseVisual.syncedWith", { mice: entry.syncedWith.join(", ") })}` : "";
   const same = entry.sameAs?.length ? `\n${i18n.t("mouseVisual.sameAs", { buttons: entry.sameAs.join(", ") })}` : "";
-  return `${name}\n${catLabel}: ${entry.action.displayName}${extrasText(entry)}${live}${synced}${same}`;
+  return `${name}\n${catLabel}: ${entry.action.displayName}${extrasText(entry)}${inMouse}${live}${synced}${same}`;
 }
 
 /** Tooltip lines for the other press patterns: "Hold: Alt+V". */

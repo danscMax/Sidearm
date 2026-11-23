@@ -1925,8 +1925,9 @@ export function setProfileMouse(
     profiles: config.profiles.map((profile) => {
       if (profile.id !== profileId) return profile;
       const { [deviceId]: current, ...others } = profile.deviceMouse ?? {};
+      const normalizedPatch = patch.hardwareBank === false ? { ...patch, hardwareBank: undefined } : patch;
       const merged = Object.fromEntries(
-        Object.entries({ ...current, ...patch }).filter(([, value]) => value !== undefined),
+        Object.entries({ ...current, ...normalizedPatch }).filter(([, value]) => value !== undefined),
       ) as MouseOverrides;
       const deviceMouse = Object.keys(merged).length > 0 ? { ...others, [deviceId]: merged } : others;
       return { ...profile, deviceMouse: Object.keys(deviceMouse).length > 0 ? deviceMouse : undefined };

@@ -80,17 +80,21 @@ describe("sidebar universal device section (#2A)", () => {
   it("shows universal device sections cleanly: Statistics for any custom device, plus Memory & Sensor for native mice", async () => {
     const onSelectTab = vi.fn();
     show([v3.id], pad.id, { devices: [v3, pad], onSelectTab });
-    // Custom device (Macro Pad): shows Statistics, hides mouse-only Memory and Sensor tabs.
-    expect(await screen.findByRole("button", { name: i18n.t("device.tabStats") })).toBeTruthy();
+    // Custom device (Macro Pad): shows Assignments and Statistics, hides mouse-only Memory and Sensor tabs.
+    expect(await screen.findByRole("button", { name: i18n.t("device.tabAssignments") })).toBeTruthy();
+    expect(screen.getByRole("button", { name: i18n.t("device.tabStats") })).toBeTruthy();
     expect(screen.queryByRole("button", { name: i18n.t("device.tabMemory") })).toBeNull();
     expect(screen.queryByRole("button", { name: i18n.t("device.tabPerformance") })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("device.tabAssignments") }));
+    expect(onSelectTab).toHaveBeenCalledWith("buttons");
     fireEvent.click(screen.getByRole("button", { name: i18n.t("device.tabStats") }));
     expect(onSelectTab).toHaveBeenCalledWith("stats");
     cleanup();
 
-    // Native mouse (V3 Pro): shows Onboard memory, Sensor & DPI, and Statistics.
+    // Native mouse (V3 Pro): shows Assignments, Onboard memory, Sensor & DPI, and Statistics.
     show([v3.id], v3.id, { devices: [v3, pad], onSelectTab });
-    expect(await screen.findByRole("button", { name: new RegExp(i18n.t("device.tabMemory")) })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: i18n.t("device.tabAssignments") })).toBeTruthy();
+    expect(screen.getByRole("button", { name: new RegExp(i18n.t("device.tabMemory")) })).toBeTruthy();
     expect(screen.getByRole("button", { name: new RegExp(i18n.t("device.tabPerformance")) })).toBeTruthy();
     expect(screen.getByRole("button", { name: i18n.t("device.tabStats") })).toBeTruthy();
   });

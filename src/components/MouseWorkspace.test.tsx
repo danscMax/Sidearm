@@ -13,7 +13,7 @@ vi.mock("../lib/backend", () => ({
   createOnboardBank: vi.fn(), deleteOnboardBank: vi.fn(), flushOnboardBanks: vi.fn(),
   getSidearmBank: vi.fn(), releaseSidearmBank: vi.fn(), moveSidearmBank: vi.fn(),
   listNativeMice: vi.fn(async () => []), listenNativeMiceChanged: vi.fn(async () => () => {}),
-  listenMouseBattery: vi.fn(), listenActionExecutionEvent: vi.fn(),
+  listenMouseBattery: vi.fn(), listenOnboardBankWriteProgress: vi.fn(), listenActionExecutionEvent: vi.fn(),
   setMouseDpi: vi.fn(), setMousePollRate: vi.fn(), setKeySignals: vi.fn(), openDeviceReportIssue: vi.fn(),
   normalizeCommandError: (error: unknown) => ({ message: String(error) }),
 }));
@@ -23,6 +23,7 @@ const partial: MouseSettings = { ...readings, batteryPercent: null, status: "par
 ] };
 let batteryEvent: () => void;
 let nativeMiceEvent: () => void;
+let writeProgressEvent: (event: backend.OnboardBankWriteProgress) => void;
 let executionEvent: (event: { actionType: string; summary: { key: string } }) => void;
 
 beforeEach(async () => {
@@ -31,6 +32,7 @@ beforeEach(async () => {
   vi.mocked(backend.getMouseSettings).mockResolvedValue(readings);
   vi.mocked(backend.getNativeModel).mockResolvedValue({ name: "Naga", deviceId: "razer-naga", banks: false, connected: true, verified: true, consumerSignals: null, dpiMin: 100, dpiMax: 30000, pollRates: [125, 500, 1000] });
   vi.mocked(backend.listenMouseBattery).mockImplementation(async (callback) => { batteryEvent = () => callback({ model: "Razer Naga V2 HyperSpeed", percent: 63, low: false }); return vi.fn<() => void>(); });
+  vi.mocked(backend.listenOnboardBankWriteProgress).mockImplementation(async (callback) => { writeProgressEvent = callback; return vi.fn<() => void>(); });
   vi.mocked(backend.listenNativeMiceChanged).mockImplementation(async (callback) => { nativeMiceEvent = () => callback([]); return vi.fn<() => void>(); });
   vi.mocked(backend.listenActionExecutionEvent).mockImplementation(async (_name, callback) => { executionEvent = callback as typeof executionEvent; return vi.fn<() => void>(); });
   vi.mocked(backend.getDeviceReport).mockResolvedValue("Sidearm diagnostic summary");
@@ -474,6 +476,71 @@ describe("independent mouse readings", () => {
     const slot1Tab = screen.getByRole("tab", { name: `${i18n.t("mouse.slotRow", { n: 1 })}: Main` });
     fireEvent.contextMenu(slot1Tab, { clientX: 80, clientY: 80 });
     fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("mouse.slotCtxOpenButtons", { name: "Main" }) }));
+    expect(onOpenButtons).toHaveBeenCalledWith("main");
+  });
+
+  it("shows live bank write progress bar with ETA and supports exiting Memory via Back to assignments", async () => {
+    const model = await backend.getNativeModel();
+    vi.mocked(backend.getNativeModel).mockResolvedValue({ ...model, deviceId: NAGA_V3_DEVICE_ID, banks: true, consumerSignals: true });
+    vi.mocked(backend.getOnboardBanks).mockResolvedValue({ assigned: [1, 2], active: 1 });
+    vi.mocked(backend.getSidearmBank).mockResolvedValue(5);
+    let resolveFlush!: () => void;
+    vi.mocked(backend.flushOnboardBanks).mockReturnValueOnce(new Promise<void>((resolve) => { resolveFlush = resolve; }));
+
+    const base = makeConfig();
+    const config: AppConfig = {
+      ...base,
+      profiles: [
+        { ...base.profiles[0], id: "main", name: "Main", deviceSlots: { [NAGA_V3_DEVICE_ID]: 1 } },
+        { ...base.profiles[1], id: "code", name: "Code", deviceSlots: { [NAGA_V3_DEVICE_ID]: 2 } },
+      ],
+    };
+    const onOpenButtons = vi.fn();
+    render(
+      <MouseWorkspace
+        activeConfig={config}
+        deviceId={NAGA_V3_DEVICE_ID}
+        section="memory"
+        profiles={config.profiles}
+        activeProfile={config.profiles[0]}
+        runtimeProfileId="main"
+        updateDraft={vi.fn()}
+        onOpenProfileButtons={onOpenButtons}
+        mouseStates={[]}
+      />,
+    );
+
+    const writeBtn = await screen.findByRole("button", { name: i18n.t("mouse.slotsWriteNow") });
+    fireEvent.click(writeBtn);
+
+    // Initial preparing state shows progressbar
+    expect(screen.getByRole("progressbar")).toBeTruthy();
+
+    // Stream real progress event from backend -> updates percentage, slot label, and ETA
+    act(() => {
+      writeProgressEvent({
+        deviceId: NAGA_V3_DEVICE_ID,
+        phase: "writing",
+        bank: 2,
+        bankIndex: 2,
+        totalBanks: 2,
+        profileName: "Code",
+        doneSteps: 50,
+        totalSteps: 100,
+        elapsedMs: 10_000,
+      });
+    });
+    expect(screen.getByText("50%")).toBeTruthy();
+    expect(screen.getByText(i18n.t("mouse.writeProgressSlot", { index: 2, total: 2, name: "Code" }))).toBeTruthy();
+    expect(screen.getByText(i18n.t("mouse.writeEtaSec", { sec: 10 }))).toBeTruthy();
+
+    // Complete write -> progress bar clears and button shows Written
+    await act(async () => resolveFlush());
+    expect(await screen.findByRole("button", { name: i18n.t("mouse.slotsWrittenNow") })).toBeTruthy();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+
+    // Back to assignments button exits memory editor to active profile
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("mouse.backToAssignments") }));
     expect(onOpenButtons).toHaveBeenCalledWith("main");
   });
 });

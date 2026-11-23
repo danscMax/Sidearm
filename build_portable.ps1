@@ -211,32 +211,25 @@ function Write-FrontendProgress {
 }
 
 function Stop-AppProcessIfRunning {
-    $running = Get-Process -Name 'Sidearm' -ErrorAction SilentlyContinue
-    if (-not $running) {
-        # Try the dev build name too
-        $running = Get-Process -Name 'sidearm' -ErrorAction SilentlyContinue
+    param([string]$UnderDir)
+    # Only stop Sidearm instances whose executable actually lives under $UnderDir
+    # (when provided). Stopping the user's running portable/dev Sidearm before an
+    # 8-minute release compile left them without mouse bindings/scroll for the
+    # entire build — only the directory being overwritten needs to be unlocked.
+    $all = @(Get-CimInstance Win32_Process -Filter "Name = 'Sidearm.exe'" -ErrorAction SilentlyContinue)
+    if ($UnderDir) {
+        $resolved = [System.IO.Path]::GetFullPath($UnderDir).TrimEnd('\') + '\'
+        $all = @($all | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($resolved, [StringComparison]::OrdinalIgnoreCase) })
     }
-    if (-not $running) { return }
+    if ($all.Count -eq 0) { return }
 
-    $pids = ($running | ForEach-Object { $_.Id }) -join ', '
-    Write-Warn "Detected running Sidearm (PID: $pids). Stopping..."
+    $ids = @($all | ForEach-Object { [int]$_.ProcessId })
+    $apps = @($all | Where-Object { $ids -notcontains [int]$_.ParentProcessId -and $_.CommandLine -notmatch '--restore-live-maps' -and $_.CommandLine -notmatch '--quit' } | ForEach-Object { [int]$_.ProcessId })
+    if ($apps.Count -eq 0) { return }
 
+    Write-Warn "Detected running Sidearm under '$UnderDir' (PID: $($apps -join ', ')). Stopping..."
     try {
-        # Stop the app itself: its capture helper then starts a
-        # `--restore-live-maps` process that puts the mice's own button maps
-        # back (else the V3 stays silent until its profile button is pressed).
-        # The app is the Sidearm whose parent is not a Sidearm (a command line
-        # is unreadable for an elevated instance) and that is no restore
-        # process (its watchdog's parent has ended too).
-        $all = @(Get-CimInstance Win32_Process -Filter "Name = 'Sidearm.exe'" -ErrorAction SilentlyContinue)
-        $ids = @($all | ForEach-Object { [int]$_.ProcessId })
-        $apps = @($all | Where-Object { $ids -notcontains [int]$_.ParentProcessId -and $_.CommandLine -notmatch '--restore-live-maps' } | ForEach-Object { [int]$_.ProcessId })
-        if ($apps.Count -gt 0) {
-            Stop-SidearmApps -Ids $apps
-        }
-        # The restore processes keep running (one may wait for a sleeping
-        # mouse): the exes they hold are moved out of the way before they are
-        # replaced (Move-LockedExe), not stopped.
+        Stop-SidearmApps -Ids $apps
         Write-Ok "Stopped running app(s)"
     } catch {
         Write-Fail "Could not stop process: $($_.Exception.Message)"
@@ -260,7 +253,7 @@ if ($Clean) {
     Write-Host ""
     Write-Host "  Cleaning build artifacts..." -ForegroundColor Yellow
     if (Test-Path -LiteralPath $PORTABLE_DIR) {
-        Stop-AppProcessIfRunning
+        Stop-AppProcessIfRunning -UnderDir $PORTABLE_DIR
         Move-LockedExe (Join-Path $PORTABLE_DIR $EXE_NAME)
         # ./data is the user's config (dev runs use it too) -- never part of "build artifacts".
         Get-ChildItem -LiteralPath $PORTABLE_DIR -Force |
@@ -318,12 +311,10 @@ if (-not $SkipBuild) {
 
     $script:buildStartTime = Get-Date
 
-    # Stop any running Sidearm BEFORE compiling. The release LTO link step is
-    # memory-heavy; freeing the running instance(s) lowers the chance of a
-    # transient OOM/link failure under load and rules out any lock on
-    # target/release/sidearm.exe. The assemble step stops it again before
-    # copying the fresh EXE.
-    Stop-AppProcessIfRunning
+    # Only unlock target/release before compiling — keep the user's running
+    # portable or dev Sidearm alive during the multi-minute Rust build so their
+    # mouse keeps working throughout.
+    Stop-AppProcessIfRunning -UnderDir (Join-Path $TAURI_TARGET_DIR 'release')
     # Both names cargo gives the exe: the linker writes the deps one.
     Move-LockedExe $TAURI_EXE
     Move-LockedExe (Join-Path $TAURI_TARGET_DIR "release\deps\$BUILD_EXE_NAME")
@@ -453,7 +444,7 @@ $stepNum = if ($SkipBuild) { 1 } else { 2 }
 Write-Step $stepNum $totalSteps "Assembling portable package"
 
 if (Test-Path -LiteralPath $PORTABLE_DIR) {
-    Stop-AppProcessIfRunning
+    Stop-AppProcessIfRunning -UnderDir $PORTABLE_DIR
     Move-LockedExe (Join-Path $PORTABLE_DIR $EXE_NAME)
     # Preserve ./data (config, profiles, snapshots, WebView2 state) across
     # rebuilds -- wipe only the executable + bundled resources, never user data

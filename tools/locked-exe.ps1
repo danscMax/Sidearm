@@ -1,4 +1,4 @@
-# Dot-sourced by dev.ps1 and build_portable.ps1.
+﻿# Dot-sourced by dev.ps1 and build_portable.ps1.
 
 function Move-LockedExe {
     # A running Sidearm restore process (`--restore-live-maps`, maybe waiting
@@ -41,17 +41,34 @@ function Stop-SidearmApps {
     param([Parameter(Mandatory)][int[]]$Ids, [int]$TimeoutSec = 30)
     $exes = @($Ids | ForEach-Object { (Get-CimInstance Win32_Process -Filter "ProcessId = $_" -ErrorAction SilentlyContinue).ExecutablePath } |
         Where-Object { $_ } | Sort-Object -Unique)
+    $quitProcs = @()
     foreach ($exe in $exes) {
-        try { Start-Process -FilePath $exe -ArgumentList '--quit' -WindowStyle Hidden -ErrorAction Stop } catch {
+        try {
+            $q = Start-Process -FilePath $exe -ArgumentList '--quit' -WindowStyle Hidden -PassThru -ErrorAction Stop
+            if ($q) { $quitProcs += $q }
+        } catch {
             Write-Host "  Could not ask $exe to quit: $($_.Exception.Message)" -ForegroundColor Yellow
         }
     }
-    Wait-Process -Id $Ids -Timeout $TimeoutSec -ErrorAction SilentlyContinue
-    $left = @($Ids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
-    if ($left.Count -gt 0) {
-        Write-Host "  Sidearm did not quit within $TimeoutSec s: stopping PID $($left -join ', ')" -ForegroundColor Yellow
-        Stop-Process -Id $left -Force -ErrorAction SilentlyContinue
-        Wait-Process -Id $left -Timeout 10 -ErrorAction SilentlyContinue
+    try {
+        Wait-Process -Id $Ids -Timeout $TimeoutSec -ErrorAction SilentlyContinue
+        $left = @($Ids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
+        if ($left.Count -gt 0) {
+            Write-Host "  Sidearm did not quit within $TimeoutSec s: stopping PID $($left -join ', ')" -ForegroundColor Yellow
+            Stop-Process -Id $left -Force -ErrorAction SilentlyContinue
+            Wait-Process -Id $left -Timeout 10 -ErrorAction SilentlyContinue
+        }
+    } finally {
+        # Never leave a `--quit` helper alive (e.g. if UIPI prevented it from
+        # reaching an elevated instance): a lingering helper could block mouse restore.
+        foreach ($q in $quitProcs) {
+            if ($q -and -not $q.HasExited) {
+                Wait-Process -Id $q.Id -Timeout 3 -ErrorAction SilentlyContinue
+                if (-not $q.HasExited) {
+                    Stop-Process -Id $q.Id -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
     }
 }
 

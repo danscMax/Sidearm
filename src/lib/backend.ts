@@ -695,6 +695,25 @@ export async function listenConfigChangedExternally(onChange: () => void): Promi
   return listenEvent<null>("config_changed_externally", () => onChange());
 }
 
+/** Progress snapshot emitted while writing onboard memory banks to flash. */
+export interface OnboardBankWriteProgress {
+  deviceId: string;
+  phase: "preparing" | "writing" | "verifying" | "done";
+  bank: number;
+  bankIndex: number;
+  totalBanks: number;
+  profileName: string;
+  doneSteps: number;
+  totalSteps: number;
+  elapsedMs: number;
+}
+
+export async function listenOnboardBankWriteProgress(
+  onProgress: (progress: OnboardBankWriteProgress) => void,
+): Promise<UnlistenFn> {
+  return listenEvent<OnboardBankWriteProgress>("onboard_bank_write_progress", onProgress);
+}
+
 /** Right click → Edit in the popup menu: open this item of this menu. */
 export interface MenuEditRequest {
   menuActionId: string;

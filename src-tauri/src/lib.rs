@@ -3925,8 +3925,16 @@ async fn flush_onboard_banks(app: AppHandle, device_id: String, config: AppConfi
             ));
         }
         let config_dir = resolve_config_dir(&app)?;
-        mouse_memory::live_overlay::flush_bank_store_now(model, &config, &config_dir)
-            .map_err(|msg| bank_command_error(&msg))
+        let app_for_progress = app.clone();
+        mouse_memory::live_overlay::flush_bank_store_now_with_progress(
+            model,
+            &config,
+            &config_dir,
+            &mut |progress| {
+                let _ = app_for_progress.emit("onboard_bank_write_progress", progress);
+            },
+        )
+        .map_err(|msg| bank_command_error(&msg))
     })
     .await
     .map_err(|e| CommandError::internal(format!("flush onboard banks task failed: {e}")))?
@@ -4428,8 +4436,13 @@ fn epoch_seconds_string() -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let is_quit_probe = std::env::args().any(|arg| arg == QUIT_ARG);
+    // A `--quit` invocation only exists to signal a running instance through
+    // `tauri_plugin_single_instance`. Never claim `APP_MUTEX` from it — if the
+    // running instance exits or is killed right then, a `--quit` process holding
+    // `APP_MUTEX` would block `mouse_restore` from restoring the mouse's banks.
     #[cfg(target_os = "windows")]
-    let _app_mutex = mouse_restore::claim_app();
+    let _app_mutex = (!is_quit_probe).then(mouse_restore::claim_app);
     // Safety net: release all modifier keys if we panic while holding keys.
     // NOTE: This only works with panic="unwind" (the default). If Cargo.toml
     // sets panic="abort" for release, this hook won't run in release builds.
@@ -4589,6 +4602,12 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(move |app| {
+            // If `--quit` reached `setup`, no same-IL instance handled it (either
+            // it already exited or UIPI blocked forwarding). Never boot a full UI
+            // from a `--quit` invocation.
+            if is_quit_probe {
+                std::process::exit(0);
+            }
             // One-time migration from old "com.nagaworkflowstudio.desktop" config dir.
             migrate_old_config(app.handle());
             // Best-effort removal of pre-rebrand orphan directories

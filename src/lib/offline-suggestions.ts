@@ -74,6 +74,67 @@ function liveLayerFor(layer: OfflineLayer): "standard" | "hypershift" {
   return layer === "offlineHypershift" ? "hypershift" : "standard";
 }
 
+/** Parse a `send` sequence step (e.g. "Ctrl+Shift+C", "Esc", "Ctrl+=") into a
+ *  firmware-compatible shortcut payload, or null when unplayable in flash. */
+function parseSequenceShortcut(value: string): ShortcutActionPayload | null {
+  const raw = value.trim();
+  if (!raw) return null;
+  let ctrl = false;
+  let shift = false;
+  let alt = false;
+  let win = false;
+  let key = "";
+  const tokens: string[] = [];
+  let buf = "";
+  for (let i = 0; i < raw.length; i += 1) {
+    const ch = raw[i];
+    if (ch === "+" && buf.length > 0 && i < raw.length - 1) {
+      tokens.push(buf.trim());
+      buf = "";
+    } else {
+      buf += ch;
+    }
+  }
+  if (buf.trim()) tokens.push(buf.trim());
+  for (const token of tokens) {
+    const lower = token.toLowerCase();
+    if (lower === "ctrl" || lower === "control") ctrl = true;
+    else if (lower === "shift") shift = true;
+    else if (lower === "alt") alt = true;
+    else if (lower === "win" || lower === "meta" || lower === "super") win = true;
+    else if (!key) key = token.length === 1 ? token.toUpperCase() : token;
+    else return null;
+  }
+  const payload: ShortcutActionPayload = { key, ctrl, shift, alt, win };
+  return isOfflinePayloadPlayable(payload) ? payload : null;
+}
+
+function sequenceSuggestions(
+  action: Extract<Action, { type: "sequence" }>,
+  t: TFunction,
+): Array<{ source: string; hint?: string; autoApply: boolean; payload: ShortcutActionPayload }> {
+  const activeSteps = action.payload.steps.filter((step) => step.type !== "sleep");
+  if (activeSteps.length === 0) return [];
+  const firstSend = activeSteps.find(
+    (step): step is Extract<typeof step, { type: "send" }> => step.type === "send" && Boolean(step.value),
+  );
+  if (!firstSend) return [];
+  const payload = parseSequenceShortcut(firstSend.value);
+  if (!payload) return [];
+  const firstSig = payloadSignature(payload);
+  const allSameShortcut = activeSteps.every((step) => {
+    if (step.type !== "send" || !step.value) return false;
+    const parsed = parseSequenceShortcut(step.value);
+    return parsed !== null && payloadSignature(parsed) === firstSig;
+  });
+  return [{
+    source: t("offlineFix.sourceFromSequence"),
+    hint: t(allSameShortcut ? "offlineFix.sequenceRepeatHint" : "offlineFix.sequenceFirstStepHint"),
+    autoApply: allSameShortcut,
+    payload,
+  }];
+}
+
 function resolveSnippetText(config: AppConfig, action: Extract<Action, { type: "textSnippet" }>): string {
   const { payload } = action;
   if (payload.source === "libraryRef") {
@@ -231,24 +292,83 @@ function textSuggestions(
 function mouseActionSuggestions(
   controlId: ControlId,
   action: Extract<Action, { type: "mouseAction" }>,
+  standardOfflineSig: string | null,
   t: TFunction,
-): Array<{ source: string; payload: OfflinePayload }> {
-  const out: Array<{ source: string; payload: OfflinePayload }> = [];
+): Array<{ source: string; hint?: string; autoApply?: boolean; payload: OfflinePayload }> {
+  const out: Array<{ source: string; hint?: string; autoApply?: boolean; payload: OfflinePayload }> = [];
   const kind = action.payload.action;
   const baseControl = layoutControlId(controlId);
+  const { ctrl, shift, alt, win } = action.payload;
+
+  // Ctrl + ScrollUp / ScrollDown is zoom in browsers, editors and office apps:
+  // mouse firmware cannot send Ctrl+Wheel, but Ctrl + = / Ctrl + - works natively.
+  if ((kind === "scrollUp" || kind === "scrollDown") && ctrl && !shift && !alt && !win) {
+    out.push({
+      source: t("offlineFix.sourceZoom"),
+      hint: t("offlineFix.zoomHint"),
+      autoApply: true,
+      payload: { key: kind === "scrollUp" ? "=" : "-", ctrl: true, shift: false, alt: false, win: false },
+    });
+    const plain: Extract<Action, { type: "mouseAction" }>["payload"] = { action: kind };
+    if (isOfflinePayloadPlayable(plain)) {
+      out.push({
+        source: t("offlineFix.sourceWithoutModifiers"),
+        autoApply: false,
+        payload: plain,
+      });
+    }
+    return out;
+  }
+
+  // Shift + ScrollUp / ScrollDown is horizontal scroll: offer Left / Right arrows.
+  if ((kind === "scrollUp" || kind === "scrollDown") && shift && !ctrl && !alt && !win) {
+    out.push({
+      source: t("offlineFix.sourceArrowKey"),
+      autoApply: false,
+      payload: { key: kind === "scrollUp" ? "Left" : "Right", ctrl: false, shift: false, alt: false, win: false },
+    });
+    const plain: Extract<Action, { type: "mouseAction" }>["payload"] = { action: kind };
+    if (isOfflinePayloadPlayable(plain)) {
+      out.push({
+        source: t("offlineFix.sourceWithoutModifiers"),
+        autoApply: false,
+        payload: plain,
+      });
+    }
+    return out;
+  }
 
   if (kind === "scrollLeft" || kind === "scrollRight") {
     const isLeft = kind === "scrollLeft";
-    if (baseControl === "mouse_4" || baseControl === "mouse_5" || baseControl === "wheel_left" || baseControl === "wheel_right") {
+    const nativeClickPayload: OfflinePayload = { action: isLeft ? "mouseBack" : "mouseForward" };
+    const arrowPayload: OfflinePayload = { key: isLeft ? "Left" : "Right", ctrl: false, shift: false, alt: false, win: false };
+    const canSuggestNativeClick =
+      baseControl === "mouse_4" || baseControl === "mouse_5" || baseControl === "wheel_left" || baseControl === "wheel_right";
+    const nativeAlreadyOnStandard = standardOfflineSig === payloadSignature(nativeClickPayload);
+
+    if (canSuggestNativeClick && !nativeAlreadyOnStandard) {
       out.push({
         source: t("offlineFix.sourceNativeClick"),
-        payload: { action: isLeft ? "mouseBack" : "mouseForward" },
+        payload: nativeClickPayload,
       });
+      out.push({
+        source: t("offlineFix.sourceArrowKey"),
+        payload: arrowPayload,
+      });
+    } else {
+      out.push({
+        source: t("offlineFix.sourceArrowKey"),
+        payload: arrowPayload,
+      });
+      if (canSuggestNativeClick) {
+        out.push({
+          source: t("offlineFix.sourceNativeClick"),
+          hint: t("offlineFix.sameAsStandardHint"),
+          autoApply: false,
+          payload: nativeClickPayload,
+        });
+      }
     }
-    out.push({
-      source: t("offlineFix.sourceArrowKey"),
-      payload: { key: isLeft ? "Left" : "Right", ctrl: false, shift: false, alt: false, win: false },
-    });
     return out;
   }
 
@@ -315,27 +435,77 @@ function gesturePromotionSuggestion(
   actionsById: Map<string, Action>,
   profileId: string,
   controlId: ControlId,
-  layer: OfflineLayer,
   t: TFunction,
-): { source: string; payload: OfflinePayload } | null {
+): { source: string; hint?: string; autoApply?: boolean; payload: OfflinePayload } | null {
   const standardBindings = findEnabledLiveBindings(config, profileId, controlId, "standard");
   const extraGestures = standardBindings.filter((b) => gestureOf(b.triggerMode) !== "press");
   const prioritized = [
     ...extraGestures.filter((b) => b.triggerMode === "longPress"),
-    ...extraGestures.filter((b) => b.triggerMode !== "longPress"),
+    ...extraGestures.filter((b) => b.triggerMode === "hold"),
+    ...extraGestures.filter((b) => b.triggerMode !== "longPress" && b.triggerMode !== "hold"),
   ];
   for (const gestureBinding of prioritized) {
     const action = actionsById.get(gestureBinding.actionId);
     if (!action) continue;
+    const isHoldLike = gestureBinding.triggerMode === "longPress" || gestureBinding.triggerMode === "hold";
+    const source = t(isHoldLike ? "offlineFix.sourceFromHold" : "offlineFix.sourceFromGesture");
     const asPlain: Binding = { ...gestureBinding, triggerMode: "press" };
     const payload = playablePayloadOf(asPlain, action);
     if (payload) {
-      return {
-        source: t(layer === "offlineHypershift" ? "offlineFix.sourceFromHold" : "offlineFix.sourceFromGesture"),
-        payload,
-      };
+      return { source, payload };
+    }
+    if (action.type === "sequence") {
+      const seq = sequenceSuggestions(action, t)[0];
+      if (seq) {
+        return { source, hint: seq.hint, autoApply: seq.autoApply, payload: seq.payload };
+      }
     }
   }
+  return null;
+}
+
+function hypershift2Suggestion(
+  config: AppConfig,
+  actionsById: Map<string, Action>,
+  profileId: string,
+  controlId: ControlId,
+  layer: OfflineLayer,
+  t: TFunction,
+): { source: string; payload: OfflinePayload } | null {
+  if (layer !== "offlineHypershift") return null;
+  const hs2Bindings = findEnabledLiveBindings(config, profileId, controlId, "hypershift2");
+  const press = hs2Bindings.find((b) => gestureOf(b.triggerMode) === "press");
+  if (!press) return null;
+  const payload = playablePayloadOf(press, actionsById.get(press.actionId));
+  if (!payload) return null;
+  return {
+    source: t("offlineFix.sourceFromHypershift2"),
+    payload,
+  };
+}
+
+/** Signature of what the offline Standard layer already plays on this control,
+ *  used to avoid wasting an offlineHyperShift slot on an exact duplicate. */
+function standardOfflinePayloadSignature(
+  config: AppConfig,
+  actionsById: Map<string, Action>,
+  profileId: string,
+  controlId: ControlId,
+): string | null {
+  const ownOffline = findBinding(config, profileId, "offline", controlId);
+  if (ownOffline?.enabled) {
+    const payload = playablePayloadOf(ownOffline, actionsById.get(ownOffline.actionId));
+    return payload ? payloadSignature(payload) : null;
+  }
+  const standardBindings = findEnabledLiveBindings(config, profileId, controlId, "standard");
+  const press = standardBindings.find((b) => gestureOf(b.triggerMode) === "press");
+  if (press) {
+    const payload = playablePayloadOf(press, actionsById.get(press.actionId));
+    return payload ? payloadSignature(payload) : null;
+  }
+  const baseControl = layoutControlId(controlId);
+  if (baseControl === "wheel_up") return payloadSignature({ action: "scrollUp" });
+  if (baseControl === "wheel_down") return payloadSignature({ action: "scrollDown" });
   return null;
 }
 
@@ -346,7 +516,7 @@ function standardLayerSuggestion(
   controlId: ControlId,
   layer: OfflineLayer,
   t: TFunction,
-): { source: string; payload: OfflinePayload } | null {
+): { source: string; hint?: string; autoApply: boolean; payload: OfflinePayload } | null {
   if (layer !== "offlineHypershift") return null;
   const standardBindings = findEnabledLiveBindings(config, profileId, controlId, "standard");
   const press = standardBindings.find((b) => gestureOf(b.triggerMode) === "press");
@@ -355,6 +525,8 @@ function standardLayerSuggestion(
   if (!payload) return null;
   return {
     source: t("offlineFix.sourceFromStandard"),
+    hint: t("offlineFix.sameAsStandardHint"),
+    autoApply: false,
     payload,
   };
 }
@@ -410,8 +582,13 @@ export function buildOfflineFixPlan(
     const status = controlNeedsFix(entry, live);
     if (!status || !live) continue;
 
+    const standardOfflineSig = entry.layer === "offlineHypershift"
+      ? standardOfflinePayloadSignature(config, actionsById, profileId, entry.controlId)
+      : null;
+
     const seen = new Set<string>();
-    const suggestions: OfflineSuggestion[] = [];
+    const distinctSuggestions: OfflineSuggestion[] = [];
+    const duplicateSuggestions: OfflineSuggestion[] = [];
     const push = (
       candidate: { label?: string; source: string; hint?: string; autoApply?: boolean; payload: OfflinePayload } | null,
     ) => {
@@ -419,14 +596,17 @@ export function buildOfflineFixPlan(
       const sig = payloadSignature(candidate.payload);
       if (seen.has(sig)) return;
       seen.add(sig);
-      suggestions.push({
+      const duplicatesStandard = standardOfflineSig !== null && sig === standardOfflineSig;
+      const item: OfflineSuggestion = {
         id: sig,
         label: candidate.label ?? payloadDisplayLabel(candidate.payload),
         source: candidate.source,
-        hint: candidate.hint,
-        autoApply: candidate.autoApply ?? true,
+        hint: candidate.hint ?? (duplicatesStandard ? t("offlineFix.sameAsStandardHint") : undefined),
+        autoApply: duplicatesStandard ? false : (candidate.autoApply ?? true),
         payload: candidate.payload,
-      });
+      };
+      if (duplicatesStandard) duplicateSuggestions.push(item);
+      else distinctSuggestions.push(item);
     };
 
     if (live.action.type === "textSnippet") {
@@ -434,15 +614,21 @@ export function buildOfflineFixPlan(
       const pressEnter = Boolean(live.action.payload.pressEnter);
       for (const candidate of textSuggestions(text, pressEnter, t)) push(candidate);
     } else if (live.action.type === "mouseAction") {
-      for (const candidate of mouseActionSuggestions(entry.controlId, live.action, t)) push(candidate);
+      for (const candidate of mouseActionSuggestions(entry.controlId, live.action, standardOfflineSig, t)) push(candidate);
+    } else if (live.action.type === "sequence") {
+      for (const candidate of sequenceSuggestions(live.action, t)) push(candidate);
     }
 
     push(fallbackProfileSuggestion(config, actionsById, profileId, entry.controlId, entry.layer, t));
-    push(gesturePromotionSuggestion(config, actionsById, profileId, entry.controlId, entry.layer, t));
+    push(gesturePromotionSuggestion(config, actionsById, profileId, entry.controlId, t));
+    push(hypershift2Suggestion(config, actionsById, profileId, entry.controlId, entry.layer, t));
+
+    const suggestions = distinctSuggestions.length > 0 ? [...distinctSuggestions] : [...duplicateSuggestions];
     // Only suggest copying from the same profile's Standard layer when no better
-    // replacement (from text/mouse, fallback profile, or gesture) was found.
+    // replacement (from text/mouse/sequence, fallback profile, gesture, or HS2) was found.
     if (suggestions.length === 0) {
       push(standardLayerSuggestion(config, actionsById, profileId, entry.controlId, entry.layer, t));
+      suggestions.push(...distinctSuggestions, ...duplicateSuggestions);
     }
 
     const controlLabel = physical

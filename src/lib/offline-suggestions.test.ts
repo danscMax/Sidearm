@@ -242,4 +242,91 @@ describe("offline-suggestions", () => {
     expect(fallCopy.copied).toBe(1);
     expect(findBinding(fallCopy.config, "p2", "offlineHypershift", "thumb_01")).toBeTruthy();
   });
+
+  it("suggests Ctrl+= / Ctrl+- for Ctrl+scroll zoom, prefers arrow keys over duplicate Back/Forward, promotes HyperShift 2 & sequences, and never auto-applies Standard duplicates", () => {
+    const config = makeConfig({
+      physicalControls: [
+        ...makeConfig().physicalControls,
+        { id: "wheel_up", deviceId: "razer-naga", family: "wheel", defaultName: "Scroll Up", remappable: true, capabilityStatus: "verified" },
+        { id: "wheel_down", deviceId: "razer-naga", family: "wheel", defaultName: "Scroll Down", remappable: true, capabilityStatus: "verified" },
+        { id: "mouse_4", deviceId: "razer-naga", family: "topPanel", defaultName: "Back", remappable: true, capabilityStatus: "verified" },
+        { id: "thumb_02", deviceId: "razer-naga", family: "thumbGrid", defaultName: "Thumb 2", remappable: true, capabilityStatus: "verified" },
+        { id: "thumb_03", deviceId: "razer-naga", family: "thumbGrid", defaultName: "Thumb 3", remappable: true, capabilityStatus: "verified" },
+      ],
+      actions: [
+        { id: "a_zoom_in", type: "mouseAction", displayName: "Zoom In", payload: { action: "scrollUp", ctrl: true } },
+        { id: "a_zoom_out", type: "mouseAction", displayName: "Zoom Out", payload: { action: "scrollDown", ctrl: true } },
+        { id: "a_back", type: "mouseAction", displayName: "Back", payload: { action: "mouseBack" } },
+        { id: "a_hleft", type: "mouseAction", displayName: "Scroll Left", payload: { action: "scrollLeft" } },
+        { id: "a_phrase", type: "textSnippet", displayName: "Phrase", payload: { source: "inline", text: "Long phrase", pasteMode: "sendText", tags: [] } },
+        { id: "a_hs2_bold", type: "shortcut", displayName: "Ctrl+B", payload: { key: "B", ctrl: true, shift: false, alt: false, win: false } },
+        { id: "a_std_del", type: "shortcut", displayName: "Delete", payload: { key: "Delete", ctrl: false, shift: false, alt: false, win: false } },
+        { id: "a_seq_esc", type: "sequence", displayName: "Esc Esc", payload: { steps: [{ type: "send", value: "Esc" }, { type: "sleep", delayMs: 80 }, { type: "send", value: "Esc" }] } },
+      ],
+      bindings: [
+        { id: "b_zi", profileId: "p1", layer: "hypershift", controlId: "wheel_up", actionId: "a_zoom_in", label: "Zoom In", enabled: true },
+        { id: "b_zo", profileId: "p1", layer: "hypershift", controlId: "wheel_down", actionId: "a_zoom_out", label: "Zoom Out", enabled: true },
+        { id: "b_m4_std", profileId: "p1", layer: "standard", controlId: "mouse_4", actionId: "a_back", label: "Back", enabled: true },
+        { id: "b_m4_hs", profileId: "p1", layer: "hypershift", controlId: "mouse_4", actionId: "a_hleft", label: "Scroll Left", enabled: true },
+        { id: "b_t1_std", profileId: "p1", layer: "standard", controlId: "thumb_01", actionId: "a_std_del", label: "Delete", enabled: true },
+        { id: "b_t1_hs", profileId: "p1", layer: "hypershift", controlId: "thumb_01", actionId: "a_phrase", label: "Phrase", enabled: true },
+        { id: "b_t1_hs2", profileId: "p1", layer: "hypershift2", controlId: "thumb_01", actionId: "a_hs2_bold", label: "Ctrl+B", enabled: true },
+        { id: "b_t2_std", profileId: "p1", layer: "standard", controlId: "thumb_02", actionId: "a_std_del", label: "Delete", enabled: true },
+        { id: "b_t2_hs", profileId: "p1", layer: "hypershift", controlId: "thumb_02", actionId: "a_phrase", label: "Phrase", enabled: true },
+        { id: "b_t3_std", profileId: "p1", layer: "standard", controlId: "thumb_03", actionId: "a_seq_esc", label: "Esc Esc", enabled: true },
+      ],
+    });
+    const preview: OfflinePreview = {
+      target: { state: "written" },
+      controls: [
+        { controlId: "wheel_up", layer: "offlineHypershift", kind: "silent", actionId: "a_zoom_in", reason: "mouseModifiers", editable: true },
+        { controlId: "wheel_down", layer: "offlineHypershift", kind: "silent", actionId: "a_zoom_out", reason: "mouseModifiers", editable: true },
+        { controlId: "mouse_4", layer: "offlineHypershift", kind: "silent", actionId: "a_hleft", reason: "mouseModifiers", editable: true },
+        { controlId: "thumb_01", layer: "offlineHypershift", kind: "silent", actionId: "a_phrase", reason: "actionType", editable: true },
+        { controlId: "thumb_02", layer: "offlineHypershift", kind: "silent", actionId: "a_phrase", reason: "actionType", editable: true },
+        { controlId: "thumb_03", layer: "offline", kind: "silent", actionId: "a_seq_esc", reason: "actionType", editable: true },
+      ],
+    };
+
+    const plan = buildOfflineFixPlan(config, "p1", "razer-naga", preview, t);
+    const byKey = new Map(plan.items.map((item) => [`${item.layer}:${item.controlId}`, item]));
+
+    // Ctrl+ScrollUp/Down -> Ctrl+= / Ctrl+- with autoApply=true
+    expect(byKey.get("offlineHypershift:wheel_up")?.suggestions[0]).toMatchObject({
+      payload: { key: "=", ctrl: true, shift: false, alt: false, win: false },
+      autoApply: true,
+    });
+    expect(byKey.get("offlineHypershift:wheel_down")?.suggestions[0]).toMatchObject({
+      payload: { key: "-", ctrl: true, shift: false, alt: false, win: false },
+      autoApply: true,
+    });
+
+    // When Standard already does mouseBack on mouse_4, HyperShift scrollLeft suggests Left arrow FIRST
+    expect(byKey.get("offlineHypershift:mouse_4")?.suggestions[0]).toMatchObject({
+      payload: { key: "Left", ctrl: false, shift: false, alt: false, win: false },
+      autoApply: true,
+    });
+
+    // HyperShift 2 shortcut (Ctrl+B) is promoted for silent offlineHypershift slot
+    expect(byKey.get("offlineHypershift:thumb_01")?.suggestions[0]).toMatchObject({
+      payload: { key: "B", ctrl: true, shift: false, alt: false, win: false },
+      autoApply: true,
+    });
+
+    // Fallback to Standard ("Delete") on thumb_02 is shown for 1-click choice, but autoApply is false
+    expect(byKey.get("offlineHypershift:thumb_02")?.suggestions[0]).toMatchObject({
+      payload: { key: "Delete", ctrl: false, shift: false, alt: false, win: false },
+      autoApply: false,
+    });
+
+    // Repeat-shortcut sequence (Esc -> sleep -> Esc) suggests Esc with autoApply=true
+    expect(byKey.get("offline:thumb_03")?.suggestions[0]).toMatchObject({
+      payload: { key: "Esc", ctrl: false, shift: false, alt: false, win: false },
+      autoApply: true,
+    });
+
+    // applyAll applies 5 items (skipping thumb_02 Standard-duplicate)
+    const { applied } = applyAllOfflineSuggestions(config, "p1", plan.items);
+    expect(applied).toBe(5);
+  });
 });

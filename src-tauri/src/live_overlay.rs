@@ -674,10 +674,105 @@ pub fn delete_user_bank(model: &'static NativeModel, bank: u8, config_dir: &Path
     Ok(user_banks(&device)?.0)
 }
 
+/// Incremental progress snapshot emitted while writing onboard banks to flash.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OnboardBankWriteProgress {
+    pub device_id: String,
+    pub phase: &'static str,
+    pub bank: u8,
+    pub bank_index: usize,
+    pub total_banks: usize,
+    pub profile_name: String,
+    pub done_steps: usize,
+    pub total_steps: usize,
+    pub elapsed_ms: u64,
+}
+
+/// Throttled progress emitter shared across bank-store phases.
+struct BankProgressTracker<'a> {
+    device_id: &'static str,
+    started: std::time::Instant,
+    total_banks: usize,
+    done_steps: usize,
+    total_steps: usize,
+    last_emit: Option<std::time::Instant>,
+    on_progress: &'a mut dyn FnMut(OnboardBankWriteProgress),
+}
+
+impl<'a> BankProgressTracker<'a> {
+    fn new(device_id: &'static str, on_progress: &'a mut dyn FnMut(OnboardBankWriteProgress)) -> Self {
+        Self {
+            device_id,
+            started: std::time::Instant::now(),
+            total_banks: 0,
+            done_steps: 0,
+            total_steps: 0,
+            last_emit: None,
+            on_progress,
+        }
+    }
+
+    fn set_plan(&mut self, total_banks: usize, total_steps: usize) {
+        self.total_banks = total_banks;
+        self.total_steps = total_steps;
+        self.done_steps = 0;
+    }
+
+    fn emit(&mut self, phase: &'static str, bank: u8, bank_index: usize, profile_name: &str, force: bool) {
+        let now = std::time::Instant::now();
+        if !force
+            && let Some(prev) = self.last_emit
+            && now.duration_since(prev) < Duration::from_millis(120)
+        {
+            return;
+        }
+        self.last_emit = Some(now);
+        let done = if self.total_steps > 0 {
+            self.done_steps.min(self.total_steps)
+        } else {
+            self.done_steps
+        };
+        (self.on_progress)(OnboardBankWriteProgress {
+            device_id: self.device_id.to_owned(),
+            phase,
+            bank,
+            bank_index,
+            total_banks: self.total_banks,
+            profile_name: profile_name.to_owned(),
+            done_steps: done,
+            total_steps: self.total_steps,
+            elapsed_ms: self.started.elapsed().as_millis() as u64,
+        });
+    }
+
+    fn advance(&mut self, delta: usize, phase: &'static str, bank: u8, bank_index: usize, profile_name: &str, force: bool) {
+        self.done_steps = self.done_steps.saturating_add(delta);
+        self.emit(phase, bank, bank_index, profile_name, force);
+    }
+
+    fn set_done(&mut self, done: usize, phase: &'static str, bank: u8, bank_index: usize, profile_name: &str, force: bool) {
+        self.done_steps = done;
+        self.emit(phase, bank, bank_index, profile_name, force);
+    }
+}
+
 /// Immediately writes and verifies all planned onboard banks for `model`,
 /// cancelling only this model's pending delayed background store and reconciling
 /// any waiting hybrid profile once verified.
+#[cfg(test)]
 pub fn flush_bank_store_now(model: &'static NativeModel, config: &AppConfig, config_dir: &Path) -> Result<(), String> {
+    flush_bank_store_now_with_progress(model, config, config_dir, &mut |_| {})
+}
+
+/// Like [`flush_bank_store_now`], invoking `on_progress` as each bank and record
+/// is checked, written, and verified.
+pub fn flush_bank_store_now_with_progress(
+    model: &'static NativeModel,
+    config: &AppConfig,
+    config_dir: &Path,
+    on_progress: &mut dyn FnMut(OnboardBankWriteProgress),
+) -> Result<(), String> {
     if !model.live.as_ref().is_some_and(|live| live.banks) {
         return Err(format!("{} has no onboard banks", model.name));
     }
@@ -688,6 +783,8 @@ pub fn flush_bank_store_now(model: &'static NativeModel, config: &AppConfig, con
     if OFFLINE[index].load(Ordering::Acquire) != 0 {
         return Err("Mouse is in manual offline mode; return to Sidearm before writing slots".into());
     }
+    let mut tracker = BankProgressTracker::new(model.device_id, on_progress);
+    tracker.emit("preparing", 0, 0, "", true);
     *SESSION_CONFIG_DIR.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(config_dir.to_path_buf());
     // Refresh the desired profile's config snapshot so post-store reconcile sees
     // the exact config being flushed rather than a stale debounced snapshot.
@@ -726,7 +823,7 @@ pub fn flush_bank_store_now(model: &'static NativeModel, config: &AppConfig, con
             return Err("Cannot write the active bank while capture runs without Sidearm's own slot".into());
         }
     }
-    store_banks(&device, config, model, &offline, config_dir, false)
+    store_banks_with_progress(&device, config, model, &offline, config_dir, false, Some(&mut tracker))
 }
 
 fn set_offline(model: &'static NativeModel, bank: u8) {
@@ -1914,6 +2011,24 @@ fn store_banks(
     config_dir: &Path,
     exiting: bool,
 ) -> Result<(), String> {
+    store_banks_with_progress(device, config, model, offline_profile, config_dir, exiting, None)
+}
+
+struct PlannedBankWork<'a> {
+    entry: PlannedBank<'a>,
+    profile_name: String,
+    targets: Vec<(u8, u8, OnboardAction)>,
+}
+
+fn store_banks_with_progress(
+    device: &VendorDevice,
+    config: &AppConfig,
+    model: &'static NativeModel,
+    offline_profile: &str,
+    config_dir: &Path,
+    exiting: bool,
+    mut tracker: Option<&mut BankProgressTracker<'_>>,
+) -> Result<(), String> {
     // Sidearm's own bank never stores a profile.
     let (banks, _) = user_banks(device)?;
     let plan = bank_plan(config, model, &banks, offline_profile);
@@ -1922,6 +2037,26 @@ fn store_banks(
     let mut asleep = None;
     // Whether a write had Sidearm's bank play instead of the bank it wrote.
     let mut moved = false;
+    let planned_work: Vec<PlannedBankWork<'_>> = plan
+        .iter()
+        .map(|&entry| {
+            let profile_name = config
+                .profiles
+                .iter()
+                .find(|p| p.id == entry.profile_id)
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| entry.profile_id.to_owned());
+            let targets = bank_targets_for(config, model, entry);
+            PlannedBankWork { entry, profile_name, targets }
+        })
+        .collect();
+    let total_steps: usize = planned_work.iter().map(|work| work.targets.len() * 3 + 1).sum();
+    if let Some(t) = tracker.as_deref_mut() {
+        t.set_plan(planned_work.len(), total_steps);
+        if let Some(first) = planned_work.first() {
+            t.emit("preparing", first.entry.bank, 1, &first.profile_name, true);
+        }
+    }
     // The bank reselect below sets the DPI (no linked bank: no reselect); the
     // poll rate stays what the last profile switch left. A store while
     // Sidearm runs leaves the live speed alone.
@@ -1935,7 +2070,7 @@ fn store_banks(
         log::info!("[mouse-offline] {} banks already stored in the background", model.name);
         VERIFIED_HYBRID_BANKS[index].store(verified_hybrid_mask(&plan), Ordering::Release);
     } else {
-        match store_planned_banks(device, config, model, &banks, &plan, config_dir, &mut asleep, &mut moved) {
+        match store_planned_banks(device, config, model, &banks, &plan, &planned_work, config_dir, &mut asleep, &mut moved, tracker.as_deref_mut()) {
             Ok(()) => {
                 if asleep.is_none() {
                     STORED[index].store(key, Ordering::Release);
@@ -1998,6 +2133,15 @@ fn store_banks(
             log::warn!("[naga-live] {} desired profile not reconciled after bank store: {error}", model.name);
         }
     }
+    if asleep.is_none()
+        && let Some(t) = tracker
+    {
+        let (last_bank, last_name) = planned_work
+            .last()
+            .map(|work| (work.entry.bank, work.profile_name.as_str()))
+            .unwrap_or((0, ""));
+        t.set_done(total_steps, "done", last_bank, planned_work.len(), last_name, true);
+    }
     asleep.map_or(Ok(()), Err)
 }
 
@@ -2034,9 +2178,11 @@ fn store_planned_banks(
     model: &'static NativeModel,
     banks: &Banks,
     plan: &[PlannedBank<'_>],
+    planned_work: &[PlannedBankWork<'_>],
     config_dir: &Path,
     asleep: &mut Option<String>,
     moved: &mut bool,
+    mut tracker: Option<&mut BankProgressTracker<'_>>,
 ) -> Result<(), String> {
     // A bank no profile is linked to any more gets its own records back: what
     // Sidearm stored there earlier (an old turbo record included) would play on.
@@ -2050,25 +2196,45 @@ fn store_planned_banks(
             note_asleep(asleep, error);
         }
     }
-    if plan.is_empty() {
+    if planned_work.is_empty() {
         log::info!("[mouse-offline] {} keeps its {} onboard profiles: none is linked", model.name, banks.assigned.len());
         return Ok(());
     }
-    for &entry in plan {
-        let bank = entry.bank;
-        let profile_id = entry.profile_id;
+    let mut bank_start_step = 0usize;
+    for (idx, work) in planned_work.iter().enumerate() {
+        let bank = work.entry.bank;
+        let bank_index = idx + 1;
+        let profile_id = work.entry.profile_id;
+        let profile_name = work.profile_name.as_str();
+        let targets = &work.targets;
+        let bank_budget = targets.len() * 3 + 1;
+        let bank_end_step = bank_start_step + bank_budget;
+        if let Some(t) = tracker.as_deref_mut() {
+            t.set_done(bank_start_step, "writing", bank, bank_index, profile_name, true);
+        }
         let backup = bank_backup(config_dir, model, bank);
-        let targets = bank_targets_for(config, model, entry);
         let already_stored = load_snapshot(device, &backup)?.is_some_and(|snapshot| {
             snapshot.records.len() == targets.len()
-                && snapshot.records.iter().zip(&targets).all(|(record, &(button, layer, action))| {
+                && snapshot.records.iter().zip(targets).all(|(record, &(button, layer, action))| {
                     (record.button, record.layer, record.target) == (button, layer, bank_block(bank, action))
                 })
-                && verify_bank(device, bank, &snapshot.records).is_ok()
+                && verify_bank_with_progress(device, bank, &snapshot.records, || {
+                    if let Some(t) = tracker.as_deref_mut() {
+                        t.advance(1, "verifying", bank, bank_index, profile_name, false);
+                    }
+                })
+                .is_ok()
         });
         if !already_stored {
+            if let Some(t) = tracker.as_deref_mut() {
+                t.set_done(bank_start_step, "writing", bank, bank_index, profile_name, true);
+            }
             *moved |= off_the_playing_bank(device, bank)?;
-            apply_bank(device, bank, &backup, &targets)?;
+            apply_bank_with_progress(device, bank, &backup, targets, |phase, force| {
+                if let Some(t) = tracker.as_deref_mut() {
+                    t.advance(1, phase, bank, bank_index, profile_name, force);
+                }
+            })?;
         }
         log::info!("[mouse-offline] {} profile `{profile_id}` verified in bank {bank}: {} records", model.name, targets.len());
         // Each bank keeps its own DPI and the mouse switches to it with the
@@ -2081,6 +2247,10 @@ fn store_planned_banks(
                     note_asleep(asleep, error);
                 }
             }
+        }
+        bank_start_step = bank_end_step;
+        if let Some(t) = tracker.as_deref_mut() {
+            t.set_done(bank_end_step, "verifying", bank, bank_index, profile_name, true);
         }
     }
     Ok(())
@@ -2310,10 +2480,20 @@ fn restore_bank_except(device: &VendorDevice, bank: u8, backup: &Path, keep: imp
 }
 
 fn verify_bank(device: &VendorDevice, bank: u8, records: &[Record]) -> Result<(), String> {
+    verify_bank_with_progress(device, bank, records, || {})
+}
+
+fn verify_bank_with_progress(
+    device: &VendorDevice,
+    bank: u8,
+    records: &[Record],
+    mut on_step: impl FnMut(),
+) -> Result<(), String> {
     for record in records {
         if device.read_block(bank, record.button, record.layer)? != record.target {
             return Err(format!("Bank {bank} assignments changed after programming {:#04x}/{}", record.button, record.layer));
         }
+        on_step();
     }
     Ok(())
 }
@@ -2373,6 +2553,16 @@ fn repair(device: &VendorDevice, backup: &Path, snapshot: &mut Snapshot) -> Resu
 }
 
 fn apply_bank(device: &VendorDevice, bank: u8, backup: &Path, targets: &[(u8, u8, OnboardAction)]) -> Result<Snapshot, String> {
+    apply_bank_with_progress(device, bank, backup, targets, |_, _| {})
+}
+
+fn apply_bank_with_progress(
+    device: &VendorDevice,
+    bank: u8,
+    backup: &Path,
+    targets: &[(u8, u8, OnboardAction)],
+    mut on_step: impl FnMut(&'static str, bool),
+) -> Result<Snapshot, String> {
     if device.mode()? != MODE_NORMAL {
         return Err("Mouse is not in firmware mode".into());
     }
@@ -2420,6 +2610,7 @@ fn apply_bank(device: &VendorDevice, bank: u8, backup: &Path, targets: &[(u8, u8
     for &(button, layer, target) in &targets {
         if let Some(record) = kept.iter().find(|record| (record.button, record.layer) == (button, layer)) {
             records.push(record.clone());
+            on_step("writing", false);
             continue;
         }
         let mut before = device.read_block(bank, button, layer)?;
@@ -2435,6 +2626,7 @@ fn apply_bank(device: &VendorDevice, bank: u8, backup: &Path, targets: &[(u8, u8
             }
         }
         records.push(Record { button, layer, before, target });
+        on_step("writing", false);
     }
     let snapshot = Snapshot { path: device.path.clone(), records };
     if snapshot.records.is_empty() {
@@ -2444,9 +2636,14 @@ fn apply_bank(device: &VendorDevice, bank: u8, backup: &Path, targets: &[(u8, u8
     let result = snapshot
         .records
         .iter()
-        .filter(|record| record.before != record.target && !is_kept(record.button, record.layer))
-        .try_for_each(|record| write_bank(device, bank, record.button, record.layer, record.target))
-        .and_then(|()| verify_bank(device, bank, &snapshot.records));
+        .try_for_each(|record| {
+            if record.before != record.target && !is_kept(record.button, record.layer) {
+                write_bank(device, bank, record.button, record.layer, record.target)?;
+            }
+            on_step("writing", false);
+            Ok(())
+        })
+        .and_then(|()| verify_bank_with_progress(device, bank, &snapshot.records, || on_step("verifying", false)));
     if let Err(error) = result {
         if let Err(rollback) = restore_bank(device, bank, backup) {
             log::warn!("[naga-live] {} rollback of bank {bank} pending: {rollback}", device.model().name);
@@ -4534,7 +4731,22 @@ pub(crate) mod tests {
             config: config.clone(),
         });
 
-        flush_bank_store_now(&NAGA_V3_PRO, &config, dir.path()).unwrap();
+        let mut progress_events: Vec<OnboardBankWriteProgress> = Vec::new();
+        flush_bank_store_now_with_progress(&NAGA_V3_PRO, &config, dir.path(), &mut |p| {
+            progress_events.push(p);
+        })
+        .unwrap();
+        assert!(!progress_events.is_empty(), "progress events emitted during flush");
+        assert_eq!(progress_events.first().unwrap().phase, "preparing");
+        let last = progress_events.last().unwrap();
+        assert_eq!(last.phase, "done");
+        assert_eq!(last.total_banks, 2);
+        assert!(last.total_steps > 0);
+        assert_eq!(last.done_steps, last.total_steps);
+        for window in progress_events.windows(2) {
+            assert!(window[0].done_steps <= window[1].done_steps, "progress must be monotonic");
+            assert!(window[1].done_steps <= window[1].total_steps || window[1].total_steps == 0);
+        }
         assert_ne!(VERIFIED_HYBRID_BANKS[index].load(Ordering::Acquire) & (1u8 << 2), 0, "hybrid bank 2 verified");
         assert_ne!(STORED[index].load(Ordering::Acquire), 0, "stored fingerprint recorded");
         fake::with(|m| assert_eq!(m.active_bank, 2, "desired hybrid profile reconciled immediately"));

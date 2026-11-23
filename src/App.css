@@ -8468,6 +8468,93 @@ body:has(.modal-backdrop) .toast-stack {
   align-items: center;
   gap: 8px;
 }
+.memory-board__back-icon {
+  flex: 0 0 auto;
+}
+.memory-single-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+.memory-write-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--c-border-active);
+  background: var(--c-surface);
+}
+.memory-write-progress__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 14px;
+}
+.memory-write-progress__label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--c-text-bright);
+}
+.memory-write-progress__phase {
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--c-accent);
+  background: var(--c-accent-dim);
+}
+.memory-write-progress__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.8rem;
+  color: var(--c-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.memory-write-progress__pct {
+  font-weight: 600;
+  color: var(--c-text-bright);
+}
+.memory-write-progress__bar {
+  width: 100%;
+  height: 7px;
+  appearance: none;
+  -webkit-appearance: none;
+  border: none;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--c-surface-elevated);
+}
+.memory-write-progress__bar::-webkit-progress-bar {
+  background: var(--c-surface-elevated);
+  border-radius: 999px;
+}
+.memory-write-progress__bar::-webkit-progress-value {
+  background: var(--c-accent);
+  border-radius: 999px;
+  transition: width 160ms ease;
+}
+.memory-write-progress__bar:indeterminate::-webkit-progress-bar {
+  background: linear-gradient(
+    90deg,
+    var(--c-surface-elevated) 0%,
+    var(--c-accent-dim) 50%,
+    var(--c-surface-elevated) 100%
+  );
+  background-size: 200% 100%;
+  animation: memory-progress-pulse 1.3s ease-in-out infinite;
+}
+@keyframes memory-progress-pulse {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
 .memory-inspector__actions {
   display: flex;
   flex-wrap: wrap;

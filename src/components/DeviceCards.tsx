@@ -247,6 +247,20 @@ export function SidebarDeviceSection({
             <span className="sidebar__section-label">{t("sidebar.deviceHeader")}</span>
           </div>
           <nav className="sidebar-device__nav" aria-label={t("sidebar.deviceHeader")}>
+            <button
+              type="button"
+              aria-current={isDeviceTabActive("buttons") ? "page" : undefined}
+              className={`nav-item nav-item--compact${isDeviceTabActive("buttons") ? " nav-item--active" : ""}`}
+              onClick={() => onSelectDeviceTab("buttons")}
+            >
+              <svg className="nav-item__icon" width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <rect x="2.2" y="2.2" width="4.8" height="4.8" rx="1.2" stroke="currentColor" strokeWidth="1.4" />
+                <rect x="9" y="2.2" width="4.8" height="4.8" rx="1.2" stroke="currentColor" strokeWidth="1.4" />
+                <rect x="2.2" y="9" width="4.8" height="4.8" rx="1.2" stroke="currentColor" strokeWidth="1.4" />
+                <rect x="9" y="9" width="4.8" height="4.8" rx="1.2" stroke="currentColor" strokeWidth="1.4" />
+              </svg>
+              <span className="nav-item__label">{t("device.tabAssignments")}</span>
+            </button>
             {activeBuiltin ? (
               <>
                 <button

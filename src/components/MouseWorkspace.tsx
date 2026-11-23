@@ -16,11 +16,13 @@ import {
   releaseSidearmBank,
   listenMouseBattery,
   listenNativeMiceChanged,
+  listenOnboardBankWriteProgress,
   normalizeCommandError,
   openDeviceReportIssue,
   setKeySignals,
   setMouseDpi,
   setMousePollRate,
+  type OnboardBankWriteProgress,
 } from "../lib/backend";
 import {
   evaluateHybridBankStatus,
@@ -116,6 +118,7 @@ export function MouseWorkspace({
   const [slotActionBusy, setSlotActionBusy] = useState(false);
   const [confirmDeleteBank, setConfirmDeleteBank] = useState<number | null>(null);
   const [flushState, setFlushState] = useState<"idle" | "busy" | "done">("idle");
+  const [writeProgress, setWriteProgress] = useState<OnboardBankWriteProgress | null>(null);
   const [banksVersion, setBanksVersion] = useState(0);
   const [selectedSlot, setSelectedSlot] = useState<number>(1);
   const [dragOverSlot, setDragOverSlot] = useState<number | null>(null);
@@ -187,6 +190,11 @@ export function MouseWorkspace({
     const subscriptions = [
       listenNativeMiceChanged(() => { if (subscribed) refresh(); }),
       listenMouseBattery(() => { if (subscribed) refresh(); }),
+      listenOnboardBankWriteProgress((event) => {
+        if (subscribed && event.deviceId === targetRef.current) {
+          setWriteProgress(event);
+        }
+      }),
       listenActionExecutionEvent("action_executed", (event) => {
         if (subscribed && event.actionType === "mouseAction" && typeof event.summary === "object" && event.summary.key === "execution.dpiSwitched") refresh();
       }),
@@ -218,6 +226,7 @@ export function MouseWorkspace({
     setBanks(null);
     setSidearmBank(null);
     setFlushState("idle");
+    setWriteProgress(null);
     setDragOverSlot(null);
     setConfirmDeleteBank(null);
     slotInitDeviceRef.current = null;
@@ -397,11 +406,23 @@ export function MouseWorkspace({
   function handleFlushBanks(deviceId: string) {
     if (flushState === "busy" || slotActionBusy || releaseStep === "busy") return;
     setFlushState("busy");
+    setWriteProgress({
+      deviceId,
+      phase: "preparing",
+      bank: 0,
+      bankIndex: 0,
+      totalBanks: 0,
+      profileName: "",
+      doneSteps: 0,
+      totalSteps: 0,
+      elapsedMs: 0,
+    });
     setReleaseError(null);
     void flushOnboardBanks(deviceId, activeConfig).then(
       () => {
         if (!lifecycle.current.alive) return;
         setFlushState("done");
+        setWriteProgress(null);
         setBanksVersion((v) => v + 1);
         notifyBanksChanged();
         onWritten?.();
@@ -409,6 +430,7 @@ export function MouseWorkspace({
       (e: unknown) => {
         if (!lifecycle.current.alive) return;
         setFlushState("idle");
+        setWriteProgress(null);
         setReleaseError(normalizeCommandError(e).message);
       },
     );
@@ -522,6 +544,42 @@ export function MouseWorkspace({
   }
 
   if (section === "memory") {
+    const backProfileId = activeProfile?.id ?? profiles[0]?.id ?? null;
+    const renderBackToAssignmentsButton = () => (
+      onOpenProfileButtons && backProfileId ? (
+        <button
+          type="button"
+          className="action-button action-button--secondary action-button--small"
+          onClick={() => onOpenProfileButtons(backProfileId)}
+        >
+          <svg className="memory-board__back-icon" width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M10 3.5L5.5 8L10 12.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span>{t("mouse.backToAssignments")}</span>
+        </button>
+      ) : null
+    );
+    const formatWriteEta = (progress: OnboardBankWriteProgress): string => {
+      if (progress.phase === "preparing" || progress.totalSteps <= 0) {
+        return t("mouse.writeEtaPreparing");
+      }
+      if (progress.doneSteps < 3 || progress.elapsedMs < 700) {
+        return t("mouse.writeEtaEstimating");
+      }
+      const remainingSteps = Math.max(0, progress.totalSteps - progress.doneSteps);
+      const remainingSec = Math.max(1, Math.round(((progress.elapsedMs / progress.doneSteps) * remainingSteps) / 1000));
+      if (remainingSec >= 60) {
+        return t("mouse.writeEtaMinSec", { min: Math.floor(remainingSec / 60), sec: remainingSec % 60 });
+      }
+      return t("mouse.writeEtaSec", { sec: remainingSec });
+    };
+    const writePhaseLabel = (phase: OnboardBankWriteProgress["phase"]): string => {
+      if (phase === "writing") return t("mouse.writeProgressPhaseWriting");
+      if (phase === "verifying") return t("mouse.writeProgressPhaseVerifying");
+      if (phase === "done") return t("mouse.writeProgressPhaseDone");
+      return t("mouse.writeProgressPhasePreparing");
+    };
+
     const dedicatedOfflineId =
       activeConfig.settings.offlineProfileId
       && activeConfig.settings.offlineProfileId !== OFFLINE_PROFILE_ACTIVE
@@ -769,33 +827,70 @@ export function MouseWorkspace({
                 <h3 className="memory-board__title">{t("mouse.memoryTitle", { model: model.name })}</h3>
                 <p className="panel__muted help-sm">{t("mouse.memoryBoardLead")}</p>
               </div>
-              {model.connected && banks !== null ? (
-                <div className="memory-board__header-actions">
-                  {sidearmBank !== null && sidearmBank !== 5 ? (
+              <div className="memory-board__header-actions">
+                {renderBackToAssignmentsButton()}
+                {model.connected && banks !== null ? (
+                  <>
+                    {sidearmBank !== null && sidearmBank !== 5 ? (
+                      <button
+                        type="button"
+                        className="action-button action-button--secondary action-button--small"
+                        disabled={slotActionBusy || flushState === "busy" || releaseStep === "busy"}
+                        onClick={() => handleMoveSidearmBank(model.deviceId, 5)}
+                      >
+                        {t("mouse.sidearmMoveTo5Short")}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
-                      className="action-button action-button--secondary action-button--small"
-                      disabled={slotActionBusy || flushState === "busy" || releaseStep === "busy"}
-                      onClick={() => handleMoveSidearmBank(model.deviceId, 5)}
+                      className="action-button action-button--small"
+                      disabled={flushState === "busy" || slotActionBusy || releaseStep === "busy"}
+                      onClick={() => handleFlushBanks(model.deviceId)}
                     >
-                      {t("mouse.sidearmMoveTo5Short")}
+                      {flushState === "busy"
+                        ? t("mouse.slotsWriting")
+                        : flushState === "done"
+                        ? t("mouse.slotsWrittenNow")
+                        : t("mouse.slotsWriteNow")}
                     </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="action-button action-button--small"
-                    disabled={flushState === "busy" || slotActionBusy || releaseStep === "busy"}
-                    onClick={() => handleFlushBanks(model.deviceId)}
-                  >
-                    {flushState === "busy"
-                      ? t("mouse.slotsWriting")
-                      : flushState === "done"
-                      ? t("mouse.slotsWrittenNow")
-                      : t("mouse.slotsWriteNow")}
-                  </button>
-                </div>
-              ) : null}
+                  </>
+                ) : null}
+              </div>
             </div>
+
+            {flushState === "busy" && writeProgress ? (() => {
+              const hasSteps = writeProgress.totalSteps > 0;
+              const pct = hasSteps
+                ? Math.min(100, Math.round((writeProgress.doneSteps / writeProgress.totalSteps) * 100))
+                : 0;
+              const slotHeading = writeProgress.totalBanks > 0
+                ? t("mouse.writeProgressSlot", {
+                    index: writeProgress.bankIndex,
+                    total: writeProgress.totalBanks,
+                    name: writeProgress.profileName || t("mouse.slotRow", { n: writeProgress.bank }),
+                  })
+                : t("mouse.writeProgressPreparing");
+              return (
+                <div className="memory-write-progress" role="status" aria-live="polite">
+                  <div className="memory-write-progress__top">
+                    <span className="memory-write-progress__label">
+                      <span>{slotHeading}</span>
+                      <span className="memory-write-progress__phase">{writePhaseLabel(writeProgress.phase)}</span>
+                    </span>
+                    <span className="memory-write-progress__meta">
+                      {hasSteps ? <span className="memory-write-progress__pct">{pct}%</span> : null}
+                      <span>{formatWriteEta(writeProgress)}</span>
+                    </span>
+                  </div>
+                  <progress
+                    className="memory-write-progress__bar"
+                    value={hasSteps ? pct : undefined}
+                    max={100}
+                    aria-label={slotHeading}
+                  />
+                </div>
+              );
+            })() : null}
 
             {!model.connected || banks === null ? (
               <p className="panel__muted help-sm">{t("mouse.slotNeedsMouse")}</p>
@@ -1165,6 +1260,11 @@ export function MouseWorkspace({
 
     return (
       <div className="settings-shell__content">
+      {onOpenProfileButtons && backProfileId ? (
+        <div className="memory-single-bar">
+          {renderBackToAssignmentsButton()}
+        </div>
+      ) : null}
       {activeProfile && memoryCounts ? (
         <section className="settings-section" aria-label={t("offline.memorySummaryTitle", { name: activeProfile.name })}>
           <SettingRow title={t("offline.memorySummaryTitle", { name: activeProfile.name })}>

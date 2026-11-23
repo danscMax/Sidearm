@@ -2932,28 +2932,80 @@ input[type="radio"] {
   color: var(--c-text-bright);
 }
 
+.gdv--studio {
+  width: 100%;
+  max-width: 820px;
+  gap: 14px;
+}
+
 .gdv__header {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 10px;
   flex-wrap: wrap;
-  margin-bottom: 4px;
+  margin-bottom: 0;
   width: 100%;
-  max-width: 760px;
+  max-width: 820px;
 }
 
-/* Destructive action sits apart from the constructive cluster (UI-review UX4). */
-.gdv__header .gdv__delete {
-  margin-left: auto;
+.gdv__title-cluster {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.gdv__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.gdv__more-btn {
+  padding-inline: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.gdv__name-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  margin-left: -8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--c-text-bright);
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.gdv__name-btn:hover {
+  border-color: var(--c-border);
+  background: var(--c-card-bg);
+}
+
+.gdv__name-edit-icon {
+  font-size: var(--fs-caption);
+  color: var(--c-text-subtle);
+  opacity: 0.7;
+}
+
+.gdv__name-btn:hover .gdv__name-edit-icon {
+  opacity: 1;
+  color: var(--c-accent);
 }
 
 .gdv__name {
   margin: 0;
-  font-size: var(--fs-body);
+  font-size: var(--fs-heading-sm);
   color: var(--c-text-bright);
   font-weight: 600;
-  /* Long device names must not push the action row apart (UI-review V1). */
   max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2963,31 +3015,247 @@ input[type="radio"] {
 .gdv__name-input {
   font-size: var(--fs-body);
   padding: 4px 8px;
-  width: 16ch;
-  min-width: 140px;
+  width: 18ch;
+  min-width: 150px;
   max-width: 100%;
 }
 
-.gdv__empty {
+/* ── Live USB Learning Radar ── */
+@keyframes gdv-radar-pulse {
+  0% { transform: scale(0.95); opacity: 0.75; }
+  70% { transform: scale(1.22); opacity: 0; }
+  100% { transform: scale(1.22); opacity: 0; }
+}
+
+.gdv__radar {
+  width: 100%;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-alt);
+  padding: 18px 20px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.gdv__radar--armed {
+  border-color: var(--c-border-active);
+  background:
+    radial-gradient(circle at 12% 40%, var(--c-accent-dim), transparent 55%),
+    var(--c-surface-alt);
+}
+
+.gdv__radar-main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.gdv__orb {
+  position: relative;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: 2px solid var(--c-border-hover);
+  background: var(--c-card-bg);
+  color: var(--c-text-muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.gdv__radar--armed .gdv__orb {
+  border-color: var(--c-accent);
+  background: var(--c-accent-dim);
+  color: var(--c-accent);
+}
+
+.gdv__radar--armed .gdv__orb::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px solid var(--c-accent);
+  animation: gdv-radar-pulse 1.7s ease-out infinite;
+  pointer-events: none;
+}
+
+.gdv__orb-core {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.gdv__radar-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.gdv__radar-title {
+  margin: 0;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--c-text-bright);
+}
+
+.gdv__radar-sub {
+  margin: 0;
+  font-size: var(--fs-small);
+  color: var(--c-text-muted);
+  line-height: 1.4;
+}
+
+.gdv__radar-note {
+  margin: 4px 0 0;
+  font-size: var(--fs-caption);
+  color: var(--c-accent);
+  font-weight: 500;
+}
+
+.gdv__radar-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 10px;
+  border-top: 1px solid var(--c-border);
+}
+
+.gdv__radar-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-caption);
+  color: var(--c-text);
+  cursor: pointer;
+}
+
+.gdv__radar-foot-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ── Preset Graphic Picker ── */
+.gdv__presets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+.gdv__preset-card {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  padding: 32px 16px;
-  border: 1px dashed var(--c-border);
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 8px;
   border-radius: var(--radius-md);
-  margin: 8px 0;
-  max-width: 420px;
+  border: 1px solid var(--c-border);
+  background: var(--c-card-bg);
+  color: var(--c-text);
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 130ms ease, background 130ms ease, color 130ms ease;
+}
+
+.gdv__preset-card:hover {
+  border-color: var(--c-border-hover);
+  background: var(--c-surface);
+  color: var(--c-text-bright);
+}
+
+.gdv__preset-card--active {
+  border-color: var(--c-accent);
+  background: var(--c-accent-dim);
+  color: var(--c-text-bright);
+}
+
+.gdv__preset-card--clear {
+  color: var(--c-text-muted);
+}
+
+.gdv__preset-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  color: var(--c-text-bright);
+}
+
+.gdv__preset-svg--thumb {
+  width: 56px;
+  height: 38px;
+}
+
+.gdv__preset-ico {
+  width: 56px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  color: var(--c-text-muted);
+}
+
+.gdv__preset-label {
+  font-size: var(--fs-caption);
+  font-weight: 500;
+  text-align: center;
+}
+
+/* ── Interactive Schematic Stage + Drag-and-Drop ── */
+.gdv__stage-wrap {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.gdv__stage {
+  max-width: 440px;
+  width: 100%;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-alt);
+  overflow: hidden;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.gdv__stage--drop-active {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 3px var(--c-accent-dim);
+}
+
+.gdv__stage-hint {
+  margin: 0;
+  font-size: var(--fs-caption);
+  text-align: center;
+}
+
+.gdv__hotspot {
+  cursor: grab;
+  touch-action: none;
+}
+
+.gdv__hotspot--dragging {
+  cursor: grabbing;
+  transform: translate(-50%, -50%) scale(1.16);
+  z-index: 20;
 }
 
 .gdv__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
   gap: 8px;
   width: 100%;
-  /* Match the photo width so the grid and photo share edges (UI-review V7/V12). */
-  max-width: 420px;
-  margin: 8px 0;
+  margin: 4px 0;
 }
 
 .gdv__cell {
@@ -2998,6 +3266,31 @@ input[type="radio"] {
 .gdv__cell .btn-legend__cell {
   flex: 1;
   width: 100%;
+}
+
+.gdv__cell-pin {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  padding: 2px 5px;
+  border-radius: var(--radius-xs);
+  color: var(--c-text-subtle);
+  font-size: var(--fs-caption);
+  cursor: grab;
+  user-select: none;
+  opacity: 0.55;
+  transition: opacity 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.gdv__cell:hover .gdv__cell-pin {
+  opacity: 1;
+  color: var(--c-accent);
+  background: var(--c-accent-dim);
+}
+
+.gdv__cell-pin--placed {
+  color: var(--c-accent);
 }
 
 .gdv__cell-remove {
@@ -3087,14 +3380,27 @@ input[type="radio"] {
   padding: 4px 10px;
   border-radius: 999px;
   border: 1px solid var(--c-border);
-  background: var(--c-surface-alt, rgba(255, 255, 255, 0.03));
+  background: var(--c-card-bg);
   font-size: var(--fs-caption);
   color: var(--c-text-muted);
-  margin-bottom: 6px;
+}
+
+.gdv__usb-row--bound {
+  border-color: var(--c-border-active);
+  background: var(--c-accent-dim);
+  color: var(--c-accent);
+}
+
+.gdv__usb-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
 }
 
 .gdv__usb-pill {
-  max-width: 340px;
+  max-width: 280px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

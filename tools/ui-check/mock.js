@@ -118,8 +118,13 @@
       return { banks: { assigned: [...mockBanks.assigned], active: mockBanks.active }, sidearm: targetBank, displacedFrom, displacedTo };
     },
     capture_next_raw_input: () => {
+      if (Array.isArray(window.__UI_CHECK_RAW_QUEUE__) && window.__UI_CHECK_RAW_QUEUE__.length > 0) {
+        return window.__UI_CHECK_RAW_QUEUE__.shift();
+      }
       if (window.__UI_CHECK_RAW_INPUT__) {
-        return window.__UI_CHECK_RAW_INPUT__;
+        const one = window.__UI_CHECK_RAW_INPUT__;
+        window.__UI_CHECK_RAW_INPUT__ = null;
+        return one;
       }
       throw new Error("mock_no_raw_input");
     },

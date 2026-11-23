@@ -18,6 +18,8 @@ vi.mock("../lib/backend", () => ({
   readDeviceImage: vi.fn().mockResolvedValue(null),
   pickExecutablePath: vi.fn().mockResolvedValue(null),
   setKeyRecording: vi.fn().mockResolvedValue(undefined),
+  captureNextRawInput: vi.fn().mockRejectedValue(new Error("mock")),
+  cancelRawInputCapture: vi.fn().mockResolvedValue(undefined),
 }));
 
 beforeEach(async () => { await i18n.changeLanguage("en"); });

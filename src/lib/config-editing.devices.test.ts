@@ -6,8 +6,14 @@ import {
   removeControl,
   removeDevice,
   renameDevice,
+  setDeviceImage,
   setDeviceRawBinding,
 } from "./config-editing";
+import {
+  defaultHotspotForControl,
+  friendlyNameForSignal,
+  isPresetDeviceImage,
+} from "./device-presets";
 import { makeConfig } from "./test-fixtures";
 import type { Action, AppConfig, Binding } from "./config";
 
@@ -97,6 +103,23 @@ describe("findMappingByEncodedKey", () => {
     const devA = cleared.devices.find((d) => d.id === padA.deviceId);
     expect(devA?.rawDeviceId).toBeUndefined();
     expect(devA?.rawDeviceLabel).toBeUndefined();
+  });
+
+  it("supports preset device graphics and smart hotspot placement", () => {
+    const created = createDevice(makeConfig(), "Logitech");
+    const withPreset = setDeviceImage(created.config, created.deviceId, "preset-mouse.svg");
+    const dev = withPreset.devices.find((d) => d.id === created.deviceId);
+    expect(dev?.image).toBe("preset-mouse.svg");
+    expect(isPresetDeviceImage(dev?.image)).toBe(true);
+    expect(isPresetDeviceImage("custom-photo.png")).toBe(false);
+
+    const cleared = setDeviceImage(withPreset, created.deviceId, undefined);
+    expect(cleared.devices.find((d) => d.id === created.deviceId)?.image).toBeUndefined();
+
+    expect(friendlyNameForSignal("Mouse4", "Кнопка 1", true)).toBe("Боковая 4");
+    expect(friendlyNameForSignal("MouseMiddle", "Button 1", false)).toBe("Middle click");
+    expect(friendlyNameForSignal("Numpad7", "Кнопка 1", true)).toBe("Numpad 7");
+    expect(defaultHotspotForControl("preset-mouse.svg", "Mouse4", 0)).toEqual({ x: 34, y: 44 });
   });
 });
 

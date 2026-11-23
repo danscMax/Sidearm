@@ -59,6 +59,7 @@ import {
 import { sortAppMappings, toggleInSet } from "../lib/helpers";
 import { controlWithGesture, displayNameForControl, displayNameForControlId, labelForLayer } from "../lib/labels";
 import { defaultLayout, deviceLayers, deviceLayout } from "../lib/devices";
+import { isPresetDeviceImage, type DevicePresetId } from "../lib/device-presets";
 import { retargetImportedBindings } from "../lib/device-transfer";
 import { DeviceTransferModal } from "./DeviceTransferModal";
 import { ContextMenu } from "./ContextMenu";
@@ -322,6 +323,49 @@ export function ProfilesWorkspace({
     showToast(t("device.controlCreated"), "success");
   }
 
+  function handleQuickLearnControl(
+    name: string,
+    encodedKey: string,
+    rawDevice?: RawDeviceSelection | null,
+    initialHotspot?: { x: number; y: number } | null,
+  ) {
+    if (!activeDevice) return;
+    const deviceId = activeDevice.id;
+    let createdControlId: ControlId | null = null;
+    updateDraft((config) => {
+      const { config: added, controlId } = addLearnedControl(config, deviceId, name, encodedKey);
+      createdControlId = controlId;
+      let next = rawDevice
+        ? setDeviceRawBinding(added, deviceId, rawDevice.id, rawDevice.label)
+        : added;
+      if (initialHotspot) {
+        next = placeDeviceHotspot(next, deviceId, controlId, initialHotspot.x, initialHotspot.y);
+      }
+      return next;
+    });
+    if (createdControlId) setSelectedControlId(createdControlId);
+  }
+
+  function handleSelectPresetImage(preset: DevicePresetId) {
+    if (!activeDevice) return;
+    const deviceId = activeDevice.id;
+    const previous = activeDevice.image;
+    updateDraft((config) => setDeviceImage(config, deviceId, preset));
+    if (previous && !isPresetDeviceImage(previous)) {
+      void deleteDeviceImage(previous).catch(() => {});
+    }
+  }
+
+  function handleClearDeviceImage() {
+    if (!activeDevice) return;
+    const deviceId = activeDevice.id;
+    const previous = activeDevice.image;
+    updateDraft((config) => setDeviceImage(config, deviceId, undefined));
+    if (previous && !isPresetDeviceImage(previous)) {
+      void deleteDeviceImage(previous).catch(() => {});
+    }
+  }
+
   function handleEditControl(controlId: ControlId) {
     const control = activeConfig.physicalControls.find((entry) => entry.id === controlId);
     if (!control) return;
@@ -363,7 +407,7 @@ export function ProfilesWorkspace({
         setSelectedControlId(null);
         if (fallback) onSelectDevice(fallback.id);
         // Best-effort file cleanup; the config no longer references it.
-        if (image) void deleteDeviceImage(image).catch(() => {});
+        if (image && !isPresetDeviceImage(image)) void deleteDeviceImage(image).catch(() => {});
       },
     });
   }
@@ -384,7 +428,7 @@ export function ProfilesWorkspace({
     try {
       const fileName = await importDeviceImage(path);
       updateDraft((config) => setDeviceImage(config, deviceId, fileName));
-      if (previous) void deleteDeviceImage(previous).catch(() => {});
+      if (previous && !isPresetDeviceImage(previous)) void deleteDeviceImage(previous).catch(() => {});
     } catch {
       showToast(t("device.photoImportError"), "warning");
     }
@@ -983,6 +1027,7 @@ export function ProfilesWorkspace({
       ) : (
         <>
       {/* ── Layer indicator + search ── */}
+      {!(activeDevice && !activeDevice.builtin && surfaceEntries.length === 0) ? (
       <div className="profiles-workspace__toolbar">
         <span className={`layer-badge layer-badge--${selectedLayer}`}>
           {/* Both labels are rendered (the inactive one hidden) so the badge
@@ -1063,6 +1108,7 @@ export function ProfilesWorkspace({
           </div>
         ) : null}
       </div>
+      ) : null}
 
       {writeTarget ? (
         <Notice variant={writeTarget.state === "notWritten" || writeTarget.state === "unknown" ? "warning" : "info"}>
@@ -1259,7 +1305,13 @@ export function ProfilesWorkspace({
       <div className="profiles__mouse-viz">
         {activeDevice && !activeDevice.builtin ? (
           <GenericDeviceView
+            config={activeConfig}
             entries={surfaceEntries}
+            signalsByControlId={new Map(
+              activeConfig.encoderMappings
+                .filter((m) => m.layer === "standard")
+                .map((m) => [m.controlId, m.encodedKey]),
+            )}
             selectedLayer={selectedLayer}
             multiSelectedControlIds={multiSelectedControlIds}
             matchedControlIds={matchedControlIds}
@@ -1281,12 +1333,15 @@ export function ProfilesWorkspace({
             onDropBinding={offlineView ? undefined : handleDropBinding}
             device={activeDevice}
             onAddControl={() => setLearnModal({ mode: "create" })}
+            onQuickLearnControl={handleQuickLearnControl}
             onEditControl={handleEditControl}
             onRemoveControl={handleRemoveControl}
             onRenameDevice={(name) => updateDraft((config) => renameDevice(config, activeDevice.id, name))}
             onDeleteDevice={handleDeleteDevice}
             onClearRawDevice={() => updateDraft((config) => setDeviceRawBinding(config, activeDevice.id, null))}
             onPickImage={() => void handlePickImage()}
+            onSelectPresetImage={handleSelectPresetImage}
+            onClearImage={handleClearDeviceImage}
             onPlaceHotspot={(controlId, x, y) =>
               updateDraft((config) => placeDeviceHotspot(config, activeDevice.id, controlId, x, y))
             }
@@ -1329,7 +1384,7 @@ export function ProfilesWorkspace({
             onSubmit={handleSubmitControl}
           />
         ) : null}
-        {!offlineView ? <div className="heatmap-toggle">
+        {!offlineView && !(activeDevice && !activeDevice.builtin && surfaceEntries.length === 0) ? <div className="heatmap-toggle">
           <button
             type="button"
             className={`action-button action-button--small${heatmapEnabled ? " action-button--active" : ""}`}
@@ -1344,7 +1399,7 @@ export function ProfilesWorkspace({
       {!offlineView ? <DuplicatesNote duplicates={duplicates} /> : null}
 
       {/* ── Profile actions ── */}
-      {activeProfile ? (
+      {activeProfile && !(activeDevice && !activeDevice.builtin && surfaceEntries.length === 0) ? (
         <div className="profiles__profile-actions">
           <button
             type="button"

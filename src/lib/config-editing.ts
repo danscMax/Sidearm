@@ -1237,7 +1237,7 @@ export function removeControl(config: AppConfig, controlId: ControlId): AppConfi
   return stripControls(config, new Set([controlId]));
 }
 
-/** Set or clear a device's photo (bare file name in app-data/devices). */
+/** Set or clear a device's photo or preset schematic identifier. */
 export function setDeviceImage(
   config: AppConfig,
   deviceId: string,
@@ -1245,9 +1245,16 @@ export function setDeviceImage(
 ): AppConfig {
   return {
     ...config,
-    devices: config.devices.map((device) =>
-      device.id === deviceId ? { ...device, image } : device,
-    ),
+    devices: config.devices.map((device) => {
+      if (device.id !== deviceId) return device;
+      const next = { ...device };
+      if (image) {
+        next.image = image;
+      } else {
+        delete next.image;
+      }
+      return next;
+    }),
   };
 }
 

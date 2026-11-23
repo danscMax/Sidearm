@@ -7857,53 +7857,164 @@ body:has(.modal-backdrop) .toast-stack {
   margin-left: auto;
 }
 
-/* ── Mouse memory slot management & hybrid status ── */
+/* ── Mouse memory 5-slot panel & cards ── */
 .memory-summary__pills {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
-.memory-slots__toolbar {
+.memory-v3 {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.memory-v3__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.memory-v3__header-text {
+  flex: 1 1 320px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.memory-v3__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--c-text-bright);
+}
+.memory-v3__header-text > p {
+  margin: 0;
+}
+.memory-slot-map {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (max-width: 720px) {
+  .memory-slot-map {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.memory-slot-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  text-align: left;
+  font-family: inherit;
+  min-width: 0;
+}
+.memory-slot-tile__num {
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  color: var(--c-text-muted);
+}
+.memory-slot-tile__name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--c-text-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.memory-slot-tile__sub {
+  font-size: 11px;
+  color: var(--c-text-muted);
+}
+.memory-slot-tile--offline {
+  border-color: var(--c-accent);
+  background: var(--c-accent-dim);
+}
+.memory-slot-tile--direct {
+  border-color: var(--c-border-active);
+  background: var(--c-card-bg);
+}
+.memory-slot-tile--service {
+  background: var(--c-bg);
+  opacity: 0.72;
+}
+.memory-slot-tile--free {
+  border-style: dashed;
+  background: transparent;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+.memory-slot-tile--free:hover:not(:disabled) {
+  border-color: var(--c-accent);
+  background: var(--c-accent-dim);
+}
+.memory-slot-tile--free:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.memory-slot-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.memory-slot-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md);
+  background: var(--c-surface);
+}
+.memory-slot-card--add {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  border-style: dashed;
+  background: transparent;
+  padding: 10px 14px;
+}
+.memory-slot-card__head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 0 4px;
 }
-.memory-slots__count {
+.memory-slot-card__head-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.memory-slot-card__title {
+  font-size: 0.92rem;
+  color: var(--c-text-bright);
+}
+.memory-slot-card__role-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
   font-size: var(--fs-caption);
-  color: var(--c-text-muted);
   font-weight: 500;
 }
-.memory-slots__actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-.memory-slot__title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-}
-.memory-slot__title-main {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.memory-slot__active-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 7px;
-  border-radius: var(--radius-pill);
+.memory-slot-card__role-pill--offline {
   border: 1px solid var(--c-accent);
   background: var(--c-accent-dim);
   color: var(--c-text-bright);
-  font-size: var(--fs-caption);
-  font-weight: 500;
+}
+.memory-slot-card__role-pill--direct {
+  border: 1px solid var(--c-border-active);
+  background: var(--c-surface-alt);
+  color: var(--c-text-bright);
 }
 .memory-slot__controls {
   display: flex;
@@ -7914,10 +8025,74 @@ body:has(.modal-backdrop) .toast-stack {
   min-width: 0;
   max-width: 100%;
 }
-.memory-hybrid__hint {
+.memory-slot-card__footer {
+  padding-top: 8px;
+  border-top: 1px solid var(--c-border);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
+}
+.memory-slot-card__offline-note {
+  margin: 0;
+}
+.memory-slot-card__mode-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 16px;
+}
+.memory-slot-card__direct {
+  flex: 1 1 320px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.memory-slot-card__direct-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.memory-slot-card__direct-head .toggle-switch {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.memory-slot-card__direct-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.memory-slot-card__direct-title {
+  font-size: 0.86rem;
+  font-weight: 500;
+  color: var(--c-text-bright);
+}
+.memory-v3__exit-row {
+  padding-top: 4px;
+  border-top: 1px solid var(--c-border);
+}
+.memory-service-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--c-border);
+  opacity: 0.85;
+}
+.memory-service-row__text {
+  flex: 1 1 320px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.memory-service-row__title {
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: var(--c-text-muted);
 }
 .memory-hybrid__status {
   display: inline-flex;
@@ -7940,6 +8115,6 @@ body:has(.modal-backdrop) .toast-stack {
 }
 .memory-hybrid__status--muted {
   border: 1px solid var(--c-border);
-  background: var(--c-surface);
+  background: var(--c-surface-alt);
   color: var(--c-text-muted);
 }

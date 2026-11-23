@@ -264,9 +264,9 @@ describe("independent mouse readings", () => {
       />,
     );
 
-    const p1Toggle = await screen.findByRole("checkbox", { name: i18n.t("mouse.hardwareBankTitle", { name: config.profiles[0].name }) });
-    const p2Toggle = screen.getByRole("checkbox", { name: i18n.t("mouse.hardwareBankTitle", { name: config.profiles[1].name }) });
-    expect(p1Toggle.hasAttribute("disabled")).toBe(true);
+    // Dedicated offline slot (p1) shows its role calmly without a greyed-out toggle; non-offline slot (p2) gets the Direct keys toggle.
+    expect(screen.queryByRole("checkbox", { name: i18n.t("mouse.hardwareBankTitle", { name: config.profiles[0].name }) })).toBeNull();
+    const p2Toggle = await screen.findByRole("checkbox", { name: i18n.t("mouse.hardwareBankTitle", { name: config.profiles[1].name }) });
     expect(p2Toggle.hasAttribute("disabled")).toBe(false);
     expect(screen.getByText(i18n.t("mouse.hardwareBankOfflineGuard"))).toBeTruthy();
 
@@ -275,7 +275,7 @@ describe("independent mouse readings", () => {
     const updated = updates.mock.calls[0][0](config) as AppConfig;
     expect(updated.profiles[1].deviceMouse?.[NAGA_V3_DEVICE_ID]?.hardwareBank).toBe(true);
 
-    // If a profile with hardwareBank enabled becomes the dedicated offline profile, show the conflict warning.
+    // If a profile with hardwareBank enabled becomes the dedicated offline profile, show the conflict warning inside its slot card.
     const conflictConfig: AppConfig = {
       ...updated,
       settings: { ...updated.settings, offlineProfileId: "p2" },
@@ -295,7 +295,7 @@ describe("independent mouse readings", () => {
     expect(screen.getByText(i18n.t("mouse.hardwareBankOfflineConflict", { name: config.profiles[1].name }))).toBeTruthy();
   });
 
-  it("adds and deletes V3 onboard slots and writes to mouse immediately", async () => {
+  it("adds and deletes V3 onboard slots, switches offline slot role, and writes to mouse immediately", async () => {
     const model = await backend.getNativeModel();
     vi.mocked(backend.getNativeModel).mockResolvedValue({ ...model, deviceId: NAGA_V3_DEVICE_ID, banks: true, consumerSignals: true });
     vi.mocked(backend.getOnboardBanks).mockResolvedValue({ assigned: [1, 3], active: 1 });
@@ -326,11 +326,11 @@ describe("independent mouse readings", () => {
       />,
     );
 
-    expect(await screen.findByText(i18n.t("mouse.slotsUsedCount", { used: 3, max: 5 }))).toBeTruthy();
-    expect(screen.getByText(i18n.t("mouse.slotActiveBadge"))).toBeTruthy();
+    expect(await screen.findByText(i18n.t("mouse.slotsFreeSummary", { free: 2, max: 5 }))).toBeTruthy();
+    expect(screen.getByText(i18n.t("mouse.slotRoleOfflineBadge"))).toBeTruthy();
 
-    // Add slot
-    fireEvent.click(screen.getByRole("button", { name: i18n.t("mouse.slotAdd") }));
+    // Add slot via CTA button
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("mouse.slotAddNext", { n: 4 }) }));
     await waitFor(() => expect(backend.createOnboardBank).toHaveBeenCalledWith(NAGA_V3_DEVICE_ID));
 
     // Write now
@@ -338,12 +338,16 @@ describe("independent mouse readings", () => {
     await waitFor(() => expect(backend.flushOnboardBanks).toHaveBeenCalledWith(NAGA_V3_DEVICE_ID, config));
     expect(await screen.findByRole("button", { name: i18n.t("mouse.slotsWrittenNow") })).toBeTruthy();
 
+    // Make Slot 3 the default offline slot directly from its card
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("mouse.makeOfflineSlot") }));
+    const afterMakeOffline = updates.mock.calls.at(-1)?.[0](config) as AppConfig;
+    expect(afterMakeOffline.settings.offlineProfileId).toBe("p2");
+
     // Delete slot (2-step confirm) clears profile link in config
     const removeButtons = screen.getAllByRole("button", { name: i18n.t("mouse.slotDelete") });
     fireEvent.click(removeButtons[1]);
     fireEvent.click(screen.getByRole("button", { name: i18n.t("mouse.slotDeleteConfirm") }));
     await waitFor(() => expect(backend.deleteOnboardBank).toHaveBeenCalledWith(NAGA_V3_DEVICE_ID, 3));
-    expect(updates).toHaveBeenCalled();
     const afterDelete = updates.mock.calls.at(-1)?.[0](config) as AppConfig;
     expect(afterDelete.profiles[1].deviceSlots?.[NAGA_V3_DEVICE_ID]).toBeUndefined();
   });
